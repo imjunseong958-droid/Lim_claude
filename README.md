@@ -126,3 +126,4 @@ cp ~/Lim_claude/templates/verify.sh .claude/verify.sh
 | `rules/base.md`, `rules/rust.md` | `AGENTS.md` 블록에 들어가는 규칙 |
 | `skills/`, `hooks/` | 레포의 `.claude/` 아래로 복사되는 파일 |
 | `templates/verify.sh` | 레포별 검사 목록 템플릿 |
+| `tests/test_lim.sh` | `lim.sh` 테스트. 임시 레포를 만들어 설치, 재설치(Lim_claude 쪽 변경 반영 포함), 삭제를 돌려 보고, 삭제 후 레포가 설치 전과 같은지 확인해요. `lim.sh`를 고쳤으면 `tests/test_lim.sh`를 실행하세요 |

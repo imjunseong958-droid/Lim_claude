@@ -18,7 +18,7 @@ exists). The originals are kept under .claude/lim_claude/ and uninstall puts the
 EOF
 }
 
-SRC=$(cd "$(dirname "$0")" && pwd)
+SRC=$(cd "$(dirname "$0")" && pwd -P)   # physical path, to compare with git's top level
 MD_BEGIN='<!-- BEGIN Lim_claude: managed by lim.sh and replaced on update. Put repo-specific rules below the END line. -->'
 MD_END='<!-- END Lim_claude -->'
 GI_BEGIN='# BEGIN Lim_claude: managed by lim.sh. Lets git track the Lim_claude files under .claude/.'
@@ -30,7 +30,7 @@ SETTINGS_REL=.claude/settings.json
 HOOK_REL=.claude/hooks/commit-gate.sh
 HOOK_CMD='"$CLAUDE_PROJECT_DIR"/.claude/hooks/commit-gate.sh'
 HAS_HOOK='[.hooks.PreToolUse[]?.hooks[]?.command // empty | select(contains("commit-gate.sh"))] | length > 0'
-TMP=${TMPDIR:-/tmp}
+WORK=""   # scratch directory for this run; made only for commands that write (see the end)
 force=0
 repo=""
 manifest=""
@@ -38,7 +38,7 @@ manifest=""
 say()      { printf '     %s\n' "$*"; }
 warn()     { printf '     ! %s\n' "$*" >&2; }
 sum()      { cksum <"$1" | awk '{print $1 "-" $2}'; }
-tmpfile()  { mktemp "$TMP/lim.XXXXXX"; }
+tmpfile()  { mktemp "$WORK/f.XXXXXX"; }
 replace()  { cat "$2" >"$1"; rm -f "$2"; }   # overwrite $1 with $2, keeping $1's permissions
 recorded() { if [ -f "$manifest" ]; then awk -F'\t' -v p="$1" '$1==p {print $2}' "$manifest"; fi; }
 is_git()   { git -C "$repo" rev-parse --git-dir >/dev/null 2>&1; }
@@ -313,7 +313,7 @@ uninstall_repo() {
 # Resolve a target to the root of its git repo.
 resolve() {
   local dir top
-  dir=$(cd "$1" 2>/dev/null && pwd) || { echo "not a directory: $1" >&2; return 1; }
+  dir=$(cd "$1" 2>/dev/null && pwd -P) || { echo "not a directory: $1" >&2; return 1; }
   if [ -z "$dir" ] || [ "$dir" = / ]; then echo "refusing to use $1" >&2; return 1; fi
   if top=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null); then dir=$top
   else warn "$dir is not a git repository; using it anyway"; fi
@@ -337,9 +337,14 @@ if [ ${#repos[@]} -eq 0 ]; then repos=(.); fi
 command -v jq >/dev/null || { echo "lim.sh needs jq (macOS: brew install jq, Debian/Ubuntu: apt install jq)" >&2; exit 1; }
 
 # Resolve every target first, so a bad path stops the run before anything is written.
+# One scratch directory per run, removed however the run ends. Bash runs the EXIT trap on an
+# error and on a fatal signal (Ctrl-C, closed pipe) alike, and still dies by that signal,
+# so a loop that calls lim.sh sees the usual status and stops on Ctrl-C.
 targets=()
 case $cmd in
   install|update|uninstall)
+    WORK=$(mktemp -d "${TMPDIR:-/tmp}/lim.XXXXXX")
+    trap 'rm -rf "$WORK"' EXIT
     for r in "${repos[@]}"; do d=$(resolve "$r"); targets+=("$d"); done ;;
 esac
 
