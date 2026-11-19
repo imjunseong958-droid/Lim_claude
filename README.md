@@ -13,13 +13,13 @@ Anthropic 블로그 글 [How the Claude Code team thinks about verification](htt
 | `.claude/hooks/commit-gate.sh` | `git commit` 직전에 검사를 돌리고 실패하면 커밋을 막는 훅 | Claude Code |
 | `.claude/settings.json` | 위 훅 등록 한 줄 | Claude Code |
 | `.claude/lim_claude/` | 설치한 파일 목록(`manifest`)과 원래 있던 AGENTS.md, CLAUDE.md 원본(`*.orig`) | `lim.sh` |
-| `.gitignore` | `.claude/`가 무시되는 레포에서만, Lim_claude 파일을 추적하게 하는 블록 | git |
+| `.gitignore` | `.claude/`가 무시되는 레포에서만, Lim_claude 파일과 `.claude/verify.sh`를 추적하게 하는 블록 | git |
 
 ### 처음 설치할 때 정리하는 것
 
 1. **기존 `AGENTS.md`:** 내용을 `.claude/lim_claude/AGENTS.md.orig`로 옮기고, `AGENTS.md`는 Lim_claude 블록으로 새로 써요. 레포 전용 규칙이 필요하면 블록의 END 줄 아래에 쓰세요. 업데이트해도 그 부분은 유지돼요.
 2. **`CLAUDE.md`, `.claude/CLAUDE.md`:** 지워요. Claude Code는 `CLAUDE.md`가 있으면 `AGENTS.md`를 읽지 않기 때문이에요. 원본은 `.claude/lim_claude/`에 `.orig`로 보관해요.
-3. **`.gitignore`:** `.claude/`가 통째로 무시되고 있으면, 맨 아래에 블록을 추가해서 Lim_claude 파일만 추적되게 해요. `.claude/worktrees/`, `launch.json`, 다른 스킬 같은 나머지는 계속 무시돼요.
+3. **`.gitignore`:** `.claude/`가 통째로 무시되고 있으면, 맨 아래에 블록을 추가해서 Lim_claude 파일과 `.claude/verify.sh`만 추적되게 해요. `.claude/worktrees/`, `launch.json`, 다른 스킬 같은 나머지는 계속 무시돼요.
 4. `CLAUDE.local.md`는 개인 파일이라 건드리지 않고 경고만 해요. 이 파일이 있는 사람에게는 Claude Code가 `AGENTS.md`를 읽지 않아요.
 
 보관한 원본은 커밋되니까, 다른 클론에서 삭제해도 원래대로 돌아와요. `.orig`를 붙여 두는 건 Claude Code가 백업본을 규칙으로 읽지 않게 하려는 거예요.
@@ -41,7 +41,8 @@ git clone https://github.com/imjunseong958-droid/Lim_claude.git ~/Lim_claude
 ```
 
 1. 레포 경로를 여러 개 줄 수 있어요. 생략하면 현재 폴더에 설치해요.
-2. 설치가 끝나면 `git status`로 확인하고 커밋하세요. 커밋해야 팀원에게도 적용돼요.
+2. 기존 `AGENTS.md`에 그 레포만의 규칙(도메인 규칙, 금지 사항 등)이 있었다면, `.claude/lim_claude/AGENTS.md.orig`에서 그 절을 END 줄 아래로 다시 옮기세요. Lim_claude 규칙과 겹치는 일반 절(Subagents, Git/PR, 언어 규칙)은 빼도 돼요.
+3. 설치가 끝나면 `git status`로 확인하고 커밋하세요. 커밋해야 팀원에게도 적용돼요.
 
 ### 3. 업데이트
 
@@ -87,7 +88,8 @@ cp ~/Lim_claude/templates/verify.sh .claude/verify.sh
 ```
 
 1. 그 레포에 맞는 검사만 주석을 풀고, 맨 아래 두 줄을 지워요.
-2. `verify.sh`는 사람이 직접 커밋해야 해요. 커밋되지 않은 `verify.sh` 변경이 있으면 훅이 Claude의 커밋을 막아요.
+2. CI가 있는 레포라면 CI와 같은 검사를 넣으세요. 그래야 CI에서만 걸리는 커밋(fmt 위반 등)이 생기지 않아요.
+3. `verify.sh`는 사람이 직접 커밋해야 해요. 커밋되지 않은 `verify.sh` 변경이 있으면 훅이 Claude의 커밋을 막아요.
 
 ## 커밋 게이트 동작
 
@@ -96,6 +98,7 @@ cp ~/Lim_claude/templates/verify.sh .claude/verify.sh
 3. 같은 세션에서 3번 연속 실패하면 멈추고 사용자에게 보고하라고 알려 줘요. 커밋은 계속 막아요.
 4. 검사가 한 번 통과하면 실패 횟수가 초기화돼요.
 5. `jq`가 없는 컴퓨터에서는 훅이 아무것도 하지 않아요.
+6. 그 컴퓨터에서 검사 자체가 돌지 않으면(툴체인 문제 등) 커밋도 계속 막혀요. 설치한 뒤 `.claude/verify.sh`나 자동 감지 검사를 한 번 직접 돌려서 통과하는지 확인하세요.
 
 ## 블로그 글에서 가져온 것
 
