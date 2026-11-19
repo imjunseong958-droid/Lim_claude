@@ -49,7 +49,7 @@ check ".claude/CLAUDE.md removed, original kept" '[ ! -e "$B/.claude/CLAUDE.md" 
 git -C "$B" add -A
 tracked=$(git -C "$B" diff --cached --name-only | sort | tr '\n' ' ')
 echo "    staged: $tracked"
-check "git tracks the Lim_claude files" 'for f in .claude/hooks/commit-gate.sh .claude/skills/verify/SKILL.md .claude/settings.json $ST/manifest $ST/AGENTS.md.orig $ST/CLAUDE.md.orig $ST/.claude__CLAUDE.md.orig; do echo "$tracked" | grep -q "$f" || exit 1; done'
+check "git tracks the Lim_claude files" '(for f in .claude/hooks/commit-gate.sh .claude/skills/verify/SKILL.md .claude/settings.json $ST/manifest $ST/AGENTS.md.orig $ST/CLAUDE.md.orig $ST/.claude__CLAUDE.md.orig; do echo "$tracked" | grep -q "$f" || exit 1; done)'
 check "git still ignores worktrees, launch.json, other skills" '! echo "$tracked" | grep -q "worktrees\|launch.json\|skills/mine"'
 git -C "$B" reset -q
 printf '#!/bin/sh\nexit 0\n' > "$B/.claude/verify.sh"
@@ -118,8 +118,16 @@ check "normal install and uninstall leave none" '[ -z "$(ls -A "$GT")" ]'
 H="$T/h"; mkrepo "$H"; git -C "$H" commit -q --allow-empty -m init; mkdir "$H/.claude"; touch "$H/.claude/hooks"   # fails after temp files exist
 TMPDIR="$GT" "$R/lim.sh" install "$H" >/dev/null 2>&1; rc=$?
 check "failed install leaves none" '[ $rc -ne 0 ] && [ -z "$(ls -A "$GT")" ]'
-TMPDIR="$GT" "$R/lim.sh" install "$G" 2>/dev/null | head -1 >/dev/null
+TMPDIR="$GT" "$R/lim.sh" install "$G" 2>/dev/null | head -1 >/dev/null; rc=${PIPESTATUS[0]}
+check "install cut off by a closed pipe dies by SIGPIPE (141)" '[ $rc -eq 141 ]'
 check "install cut off by a closed pipe leaves none" '[ -z "$(ls -A "$GT")" ]'
+TMPDIR="/nonexistent" "$R/lim.sh" --help >/dev/null 2>&1; rc=$?
+check "--help needs no temp dir" '[ $rc -eq 0 ]'
+
+echo "== H. called through a symlink =="
+L2="$T/lim2"; mkdir "$L2"; (cd "$R" && tar cf - --exclude .git .) | (cd "$L2" && tar xf -); git init -q "$L2"; ln -s "$L2" "$T/limlink"
+"$T/limlink/lim.sh" install "$T/limlink" > "$T/h.out" 2>&1; rc=$?
+check "refuses to install into itself through a symlink" '[ $rc -ne 0 ] && grep -q "into itself" "$T/h.out" && [ ! -e "$L2/AGENTS.md" ]'
 
 echo
 echo "passed $pass, failed $fail"
