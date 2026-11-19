@@ -10,6 +10,9 @@
 
 set -uo pipefail
 
+# Without jq the hook cannot read its input, so it stays out of the way.
+command -v jq >/dev/null 2>&1 || exit 0
+
 input=$(cat)
 cmd=$(jq -r '.tool_input.command // ""' <<<"$input")
 session=$(jq -r '.session_id // "default"' <<<"$input")
