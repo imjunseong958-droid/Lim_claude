@@ -30,7 +30,10 @@ SETTINGS_REL=.claude/settings.json
 HOOK_REL=.claude/hooks/commit-gate.sh
 HOOK_CMD='"$CLAUDE_PROJECT_DIR"/.claude/hooks/commit-gate.sh'
 HAS_HOOK='[.hooks.PreToolUse[]?.hooks[]?.command // empty | select(contains("commit-gate.sh"))] | length > 0'
-TMP=${TMPDIR:-/tmp}
+# One scratch directory per run, removed however the run ends (error, Ctrl-C, closed pipe).
+WORK=$(mktemp -d "${TMPDIR:-/tmp}/lim.XXXXXX")
+trap 'rm -rf "$WORK"' EXIT
+trap 'exit 1' HUP INT PIPE TERM
 force=0
 repo=""
 manifest=""
@@ -38,7 +41,7 @@ manifest=""
 say()      { printf '     %s\n' "$*"; }
 warn()     { printf '     ! %s\n' "$*" >&2; }
 sum()      { cksum <"$1" | awk '{print $1 "-" $2}'; }
-tmpfile()  { mktemp "$TMP/lim.XXXXXX"; }
+tmpfile()  { mktemp "$WORK/f.XXXXXX"; }
 replace()  { cat "$2" >"$1"; rm -f "$2"; }   # overwrite $1 with $2, keeping $1's permissions
 recorded() { if [ -f "$manifest" ]; then awk -F'\t' -v p="$1" '$1==p {print $2}' "$manifest"; fi; }
 is_git()   { git -C "$repo" rev-parse --git-dir >/dev/null 2>&1; }

@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+# Round-trip tests for lim.sh. Usage: tests/test_lim.sh [path/to/Lim_claude] (default: this repo)
+set -u
+R=${1:-$(cd "$(dirname "$0")/.." && pwd)}
+T=$(mktemp -d "${TMPDIR:-/tmp}/limtest.XXXX")
+pass=0; fail=0
+ok()   { echo "  PASS $*"; pass=$((pass+1)); }
+bad()  { echo "  FAIL $*"; fail=$((fail+1)); }
+check(){ if eval "$2"; then ok "$1"; else bad "$1"; fi; }
+mkrepo(){ git init -q "$1" && git -C "$1" config user.email t@t && git -C "$1" config user.name t; }
+snap() { (cd "$1" && find . -path ./.git -prune -o -type f -print | sort | while read -r f; do printf '%s %s\n' "$(cksum <"$f")" "$f"; done); }
+ST=.claude/lim_claude
+
+echo "== A. fresh Rust repo: install, reinstall, uninstall =="
+A="$T/a"; mkrepo "$A"; echo '[package]' > "$A/Cargo.toml"; git -C "$A" add -A; git -C "$A" commit -qm init
+before=$(snap "$A")
+(cd "$A" && "$R/lim.sh" install) > "$T/a.out" 2>&1; rc=$?
+check "install exit 0" '[ $rc -eq 0 ]'
+check "skill installed" '[ -f "$A/.claude/skills/verify/SKILL.md" ]'
+check "hook installed and executable" '[ -x "$A/.claude/hooks/commit-gate.sh" ]'
+check "AGENTS.md starts with block and has Rust rules" 'head -1 "$A/AGENTS.md" | grep -q "BEGIN Lim_claude" && grep -q "^## Rust" "$A/AGENTS.md"'
+check "no CLAUDE.md created" '[ ! -e "$A/CLAUDE.md" ]'
+check "settings has hook" 'jq -e ".hooks.PreToolUse[0].hooks[0].command == \"\\\"\$CLAUDE_PROJECT_DIR\\\"/.claude/hooks/commit-gate.sh\"" "$A/.claude/settings.json" >/dev/null'
+check "manifest lists 2 files" '[ "$(grep -vc "^#" "$A/$ST/manifest")" -eq 2 ]'
+check "no .gitignore needed" '[ ! -e "$A/.gitignore" ]'
+after1=$(snap "$A")
+"$R/lim.sh" install "$A" > "$T/a2.out" 2>&1
+check "reinstall changes nothing" '[ "$(snap "$A")" = "$after1" ]'
+"$R/lim.sh" uninstall "$A" > "$T/a3.out" 2>&1
+check "uninstall restores repo exactly" '[ "$(snap "$A")" = "$before" ]'
+check "no .claude dir left" '[ ! -e "$A/.claude" ]'
+
+echo "== B. Moza-like: .claude/ ignored, old AGENTS.md, CLAUDE.md, .claude/CLAUDE.md, worktrees =="
+B="$T/b"; mkrepo "$B"
+printf 'node_modules/\n.claude/\n*.tmp\n.DS_Store\n' > "$B/.gitignore"
+printf '## Subagents\n\nDo not spawn subagents unless I ask.\n' > "$B/AGENTS.md"
+printf '# Claude stuff\n' > "$B/CLAUDE.md"
+git -C "$B" add -A; git -C "$B" commit -qm init
+mkdir -p "$B/.claude/worktrees/w" "$B/.claude/skills/mine"
+echo '{}' > "$B/.claude/launch.json"; echo x > "$B/.claude/worktrees/w/f"; echo mine > "$B/.claude/skills/mine/SKILL.md"
+printf 'dot claude md\n' > "$B/.claude/CLAUDE.md"
+before=$(snap "$B")
+"$R/lim.sh" install "$B" > "$T/b.out" 2>&1; rc=$?
+check "install exit 0" '[ $rc -eq 0 ]'
+check "old AGENTS.md moved to .orig" '[ "$(cat "$B/$ST/AGENTS.md.orig")" = "$(printf "## Subagents\n\nDo not spawn subagents unless I ask.")" ]'
+check "AGENTS.md is only the block" '[ "$(head -1 "$B/AGENTS.md" | grep -c "BEGIN Lim_claude")" -eq 1 ] && [ "$(tail -1 "$B/AGENTS.md")" = "<!-- END Lim_claude -->" ]'
+check "CLAUDE.md removed, original kept" '[ ! -e "$B/CLAUDE.md" ] && [ "$(cat "$B/$ST/CLAUDE.md.orig")" = "# Claude stuff" ]'
+check ".claude/CLAUDE.md removed, original kept" '[ ! -e "$B/.claude/CLAUDE.md" ] && [ "$(cat "$B/$ST/.claude__CLAUDE.md.orig")" = "dot claude md" ]'
+git -C "$B" add -A
+tracked=$(git -C "$B" diff --cached --name-only | sort | tr '\n' ' ')
+echo "    staged: $tracked"
+check "git tracks the Lim_claude files" 'for f in .claude/hooks/commit-gate.sh .claude/skills/verify/SKILL.md .claude/settings.json $ST/manifest $ST/AGENTS.md.orig $ST/CLAUDE.md.orig $ST/.claude__CLAUDE.md.orig; do echo "$tracked" | grep -q "$f" || exit 1; done'
+check "git still ignores worktrees, launch.json, other skills" '! echo "$tracked" | grep -q "worktrees\|launch.json\|skills/mine"'
+git -C "$B" reset -q
+printf '#!/bin/sh\nexit 0\n' > "$B/.claude/verify.sh"
+check "a verify.sh written later is visible to git" '[ "$(git -C "$B" status --porcelain -- .claude/verify.sh)" = "?? .claude/verify.sh" ]'
+rm "$B/.claude/verify.sh"
+"$R/lim.sh" install "$B" > "$T/b2.out" 2>&1
+check "reinstall keeps one .gitignore block" '[ "$(grep -c "BEGIN Lim_claude" "$B/.gitignore")" -eq 1 ]'
+"$R/lim.sh" uninstall "$B" > "$T/b3.out" 2>&1; rc=$?
+check "uninstall exit 0" '[ $rc -eq 0 ]'
+check "uninstall restores repo exactly" '[ "$(snap "$B")" = "$before" ]'
+echo "    (uninstall output)"; sed 's/^/    /' "$T/b3.out"
+
+echo "== C. edited managed files, --force =="
+C="$T/c"; mkrepo "$C"; git -C "$C" commit -q --allow-empty -m init
+"$R/lim.sh" install "$C" >/dev/null 2>&1
+echo "# local tweak" >> "$C/.claude/hooks/commit-gate.sh"
+"$R/lim.sh" install "$C" > "$T/c.out" 2>&1
+check "edited file kept on install" 'tail -1 "$C/.claude/hooks/commit-gate.sh" | grep -q "local tweak" && grep -q "was edited" "$T/c.out"'
+"$R/lim.sh" install --force "$C" > "$T/c2.out" 2>&1
+check "--force replaces it" 'cmp -s "$R/hooks/commit-gate.sh" "$C/.claude/hooks/commit-gate.sh"'
+echo "tweak" >> "$C/.claude/skills/verify/SKILL.md"
+"$R/lim.sh" uninstall "$C" > "$T/c3.out" 2>&1
+check "uninstall keeps edited skill" 'grep -q tweak "$C/.claude/skills/verify/SKILL.md" && grep -q "left in place" "$T/c3.out"'
+check "uninstall removes unedited hook" '[ ! -e "$C/.claude/hooks/commit-gate.sh" ] && [ ! -d "$C/.claude/hooks" ]'
+
+echo "== D. upstream changes and repo-specific rules below the block =="
+L="$T/lim"; mkdir "$L"; (cd "$R" && tar cf - --exclude .git .) | (cd "$L" && tar xf -)
+D="$T/d"; mkrepo "$D"; printf 'Mine.\n' > "$D/AGENTS.md"; git -C "$D" add -A; git -C "$D" commit -qm init
+before=$(snap "$D")
+printf '#!/bin/sh\necho extra\n' > "$L/hooks/extra.sh"; chmod +x "$L/hooks/extra.sh"
+"$L/lim.sh" install "$D" >/dev/null 2>&1
+check "new upstream file installed" '[ -x "$D/.claude/hooks/extra.sh" ]'
+printf '\n## Moza only\n\n1. Extra rule.\n' >> "$D/AGENTS.md"
+rm "$L/hooks/extra.sh"; echo "10. New rule." >> "$L/rules/base.md"
+"$L/lim.sh" install "$D" > "$T/d.out" 2>&1
+check "file dropped upstream is removed" '[ ! -e "$D/.claude/hooks/extra.sh" ] && grep -q "removed .claude/hooks/extra.sh" "$T/d.out"'
+check "block updated once, repo rules kept below" '[ "$(grep -c "BEGIN Lim_claude" "$D/AGENTS.md")" -eq 1 ] && grep -q "10. New rule." "$D/AGENTS.md" && [ "$(tail -1 "$D/AGENTS.md")" = "1. Extra rule." ]'
+"$L/lim.sh" uninstall "$D" >/dev/null 2>&1
+check "uninstall: original first, then repo rules" '[ "$(cat "$D/AGENTS.md")" = "$(printf "Mine.\n\n## Moza only\n\n1. Extra rule.")" ]'
+
+echo "== E. registered hook command runs from settings =="
+E="$T/e"; mkrepo "$E"; git -C "$E" commit -q --allow-empty -m init
+"$R/lim.sh" install "$E" >/dev/null 2>&1
+printf '#!/bin/sh\necho boom; exit 1\n' > "$E/.claude/verify.sh"; chmod +x "$E/.claude/verify.sh"
+git -C "$E" add -A; git -C "$E" commit -qm setup
+cmd=$(jq -r '.hooks.PreToolUse[0].hooks[0].command' "$E/.claude/settings.json")
+echo "{\"session_id\":\"t$$\",\"cwd\":\"$E\",\"tool_input\":{\"command\":\"git commit -m x\"}}" | CLAUDE_PROJECT_DIR="$E" sh -c "$cmd" 2>"$T/e.err"; rc=$?
+check "failing verify.sh blocks commit (rc=2)" '[ $rc -eq 2 ] && grep -q boom "$T/e.err"'
+"$R/lim.sh" uninstall "$E" > "$T/e2.out" 2>&1
+check "uninstall keeps user verify.sh" '[ -x "$E/.claude/verify.sh" ] && grep -q "is yours" "$T/e2.out"'
+rm -f "${TMPDIR:-/tmp}/claude-commit-gate-t$$"
+
+echo "== F. guards =="
+"$R/lim.sh" install "$R" > "$T/f.out" 2>&1; rc=$?
+check "refuses to install into itself" '[ $rc -ne 0 ] && grep -q "into itself" "$T/f.out"'
+"$R/lim.sh" install "$T/does-not-exist" > "$T/f2.out" 2>&1; rc=$?
+check "bad path stops before writing" '[ $rc -ne 0 ] && grep -q "not a directory" "$T/f2.out" && ! grep -q "== install" "$T/f2.out"'
+"$R/lim.sh" bogus > /dev/null 2>&1; rc=$?
+check "unknown command exits non-zero" '[ $rc -ne 0 ]'
+
+echo "== G. no temp files left behind =="
+G="$T/g"; mkrepo "$G"; git -C "$G" commit -q --allow-empty -m init
+GT="$T/gtmp"; mkdir "$GT"
+TMPDIR="$GT" "$R/lim.sh" install "$G" >/dev/null 2>&1; TMPDIR="$GT" "$R/lim.sh" uninstall "$G" >/dev/null 2>&1
+check "normal install and uninstall leave none" '[ -z "$(ls -A "$GT")" ]'
+H="$T/h"; mkrepo "$H"; git -C "$H" commit -q --allow-empty -m init; mkdir "$H/.claude"; touch "$H/.claude/hooks"   # fails after temp files exist
+TMPDIR="$GT" "$R/lim.sh" install "$H" >/dev/null 2>&1; rc=$?
+check "failed install leaves none" '[ $rc -ne 0 ] && [ -z "$(ls -A "$GT")" ]'
+TMPDIR="$GT" "$R/lim.sh" install "$G" 2>/dev/null | head -1 >/dev/null
+check "install cut off by a closed pipe leaves none" '[ -z "$(ls -A "$GT")" ]'
+
+echo
+echo "passed $pass, failed $fail"
+rm -rf "$T"
+[ "$fail" -eq 0 ]
