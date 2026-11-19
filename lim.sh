@@ -126,6 +126,7 @@ shared_paths() {
   awk -F'\t' '!/^#/ && NF==2 {print $1}' "$manifest"
   if [ -f "$repo/$SETTINGS_REL" ]; then echo "$SETTINGS_REL"; fi
   echo "$MANIFEST_REL"
+  echo .claude/verify.sh   # the repo's own checks; trackable even before someone writes it
   for p in $TAKEOVER; do
     if [ -e "$repo/$(orig_rel "$p")" ]; then orig_rel "$p"; echo; fi
   done
