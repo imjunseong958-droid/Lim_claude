@@ -28,7 +28,7 @@ Compare the result with what the task asked for, not with what the code appears 
 
 ## 3. Rules
 
-1. Do not change tests, snapshots, lint settings, CI config, or `.claude/verify.sh` to get a pass.
+1. Do not change tests, snapshots or golden files, lint settings, CI config, or `.claude/verify.sh` to get a pass.
 2. If a failure is flaky, do not rerun until green, add sleeps, or skip the test. Find the cause or report it.
 3. After 3 failed fix attempts on the same check, stop and report.
 4. Delete scratch files, including tests you wrote only to check this change once, and stop any servers you started.
