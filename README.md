@@ -93,7 +93,7 @@ cp ~/Lim_claude/templates/verify.sh .claude/verify.sh
 4. 그 밖에는 커밋을 막고 verify 스킬을 먼저 돌리라고 알려 줘요. 같은 세션에서 2번 막힌 뒤에는 다음 커밋을 통과시켜요. Claude가 막혀서 꼼짝 못 하는 일을 막으려는 거예요. 머지 전에 CI나 로컬 검사를 한 번 더 거치니까 여기서 통과시켜도 돼요.
 5. `.claude/verify.sh`에 커밋되지 않은 변경이 있으면 2번 막힌 뒤에도 계속 막아요.
 6. merge, cherry-pick, revert, rebase 도중의 커밋은 그냥 통과시켜요. 머지한 결과는 AGENTS.md Merging 절에 따라 확인해요.
-7. 모드는 `LIM_COMMIT_GATE` 환경 변수로 정해요. `enforce`(기본)는 막고, `observe`는 막지 않는 대신 막았을 커밋을 `.git/lim-commit-gate.log`에 적고, `off`는 아무것도 하지 않아요. 팀 레포에 처음 들일 때는 `observe`로 돌려 보면서 잘못 막는 경우가 없는지 확인하세요.
+7. 모드는 `LIM_COMMIT_GATE` 환경 변수로 정해요. `enforce`(기본)는 막고, `observe`는 막지 않는 대신 막았을 커밋을 `.git/lim-commit-gate.log`에 적고, `off`는 아무것도 하지 않아요. 팀 레포에 처음 들일 때는 `observe`로 돌려 보면서 잘못 막는 경우가 없는지 확인하세요. 셸에서 `LIM_COMMIT_GATE=observe claude`로 시작하거나, `.claude/settings.json`(팀 전체) 또는 `.claude/settings.local.json`(나만)의 `"env"`에 넣으면 돼요.
 8. `jq`가 없거나 세션 기록을 읽을 수 없으면 훅은 아무것도 하지 않아요.
 
 ## 블로그 글에서 가져온 것
