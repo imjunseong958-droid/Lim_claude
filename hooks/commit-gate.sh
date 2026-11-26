@@ -340,7 +340,7 @@ if [ ${#commit_tops[@]} -gt 0 ]; then
       block verify.sh-changed "Commit blocked: .claude/verify.sh has uncommitted changes in $top. Do not change the checks that judge your change. Ask the user to review and commit verify.sh themselves."
     fi
   done
-  commit_allowed || block no-verify "Commit blocked: this session has not run the verify skill. Run it before the first commit (AGENTS.md Order of work 2). If this commit does not need verifying, end its message with \`Verified: none (<reason>)\`."
+  commit_allowed || block no-verify "Commit blocked: this session has not run the verify skill. Run it before the first commit (AGENTS.md Order of work 3). If this commit does not need verifying, end its message with \`Verified: none (<reason>)\`."
 fi
 
 # git push: with CI, CI checks the PR.

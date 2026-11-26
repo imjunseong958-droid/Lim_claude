@@ -1,7 +1,8 @@
 ## Rust
 
-1. Run `cargo check -q` after meaningful batches of changes and fix errors before continuing.
+1. Run `cargo check -q` after each batch of changes and fix errors before going on.
 2. While working, run only the relevant tests (`cargo test -q <filter>`). Run the full suite once before opening the PR.
-3. Before committing, run `cargo fmt`. Run `cargo clippy --all-targets -q` with the full suite before opening the PR, unless `.claude/verify.sh` already runs it. Fix warnings your change introduced instead of silencing them with `#[allow]`.
+3. Run `cargo fmt` before committing. Run `cargo clippy --all-targets -q` with the full suite, unless `.claude/verify.sh` already does. Fix warnings your change introduced instead of adding `#[allow]`.
 4. Put behavior tests in `tests/` against the public API or the built binary. Use `proptest` for property tests.
-5. Do not add `#[ignore]` to get past a failing test.
+5. Make states that must never happen unrepresentable: enums for states and newtypes for validated values, instead of flags and runtime checks.
+6. Do not add `#[ignore]` to get past a failing test.
