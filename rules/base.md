@@ -40,7 +40,6 @@ After the PR is open (feedback, merging the default branch in, conflicts): make 
 2. Write only what the code cannot show: how to install, run, and use the project, why a non-obvious choice was made, and constraints from outside the code. Never directory layouts, per-file descriptions, call flows, or lists of types and functions. Agents read the code faster, and such docs go stale and mislead them.
 3. Plans, progress notes, and verification reports go in your reply or the PR, not in repo files.
 4. When your change makes part of a doc wrong (usage, options, setup), fix it in the same change.
-5. Keep a `## How to run` section in AGENTS.md, below the Lim_claude END line: how to build and start the app, how to reach each feature and what it should show, and how to get test data or accounts. Add what you had to work out, in the same change.
 
 ## Git and PRs
 

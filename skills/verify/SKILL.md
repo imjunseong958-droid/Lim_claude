@@ -12,7 +12,7 @@ Skip it if it already ran in this task; for merges, rebases, cherry-picks, and c
 ## 1. Run
 
 1. Run the tests related to the change. Not `.claude/verify.sh` or the full suite: they run once on the final code (AGENTS.md Verification 2).
-2. Use the change once the way a user would, with realistic input, following `## How to run` in AGENTS.md or the README. Add a bad input only when the change handles input.
+2. Use the change once the way a user would, with realistic input, following the README if it says how to run it. Add a bad input only when the change handles input.
    - CLI: run it with real arguments and input.
    - Library: call the public API from a scratch program, or from a test if the Tests rules say to keep one.
    - HTTP service: start it and call the changed endpoints.
@@ -22,7 +22,6 @@ Skip it if it already ran in this task; for merges, rebases, cherry-picks, and c
 4. If the change depends on where it runs (OS, shell, paths, worktrees, environment variables), run it in each setting it must support, or list the ones you did not.
 5. If the change has invariants (AGENTS.md Tests 9), run their check.
 6. Compare each result with what the task asked for, not with what the code appears to do.
-7. If `## How to run` was missing or wrong for what you just did, fix it in this change.
 
 ## 2. Rules
 

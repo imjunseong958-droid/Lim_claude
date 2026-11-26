@@ -41,7 +41,7 @@ Install into one or more repos (default: the current directory):
 Then:
 
 1. Move rules specific to the repo from `.claude/lim_claude/AGENTS.md.orig` back below the END line. Drop general sections Lim_claude already covers (subagents, Git/PR, language rules).
-2. Set up the repo's checks and `## How to run` (Per repo).
+2. Set up the repo's checks (Per repo).
 3. If the repo has CI, make it a required status check: agents merge their own PRs once CI passes, and nothing inside the repo can stop a merge. On GitHub: Settings > Rules > Rulesets > New branch ruleset, target the default branch, turn on **Require status checks to pass**, and add the CI jobs (one job that waits on the others is enough). Other hosts have this under branch protection. `install` reminds you when it finds CI config.
 4. Check `git status` and commit. Teammates get the rules once they are committed.
 
@@ -78,11 +78,7 @@ cp ~/Lim_claude/templates/verify.sh .claude/verify.sh
 
 With CI, use the same checks as CI, so PRs don't fail only there. Run it once yourself: if it fails from the start, the agent cannot push. A person commits `verify.sh`; the hook blocks Claude's commits while it has uncommitted changes.
 
-### How to run: `## How to run` in AGENTS.md
-
-Below the END line, the repo's feature map: how to build and start the app, how to reach each feature and what it should show, and how to get test data or accounts. The verify skill drives the app from it, and agents add what they work out. Seed it with what a new teammate needs on day one.
-
-Keep `verify.sh` and this section fast and reliable. They are the repo's smoke-test harness: a flaky one teaches agents to rerun instead of fix, and a slow one makes them run fewer checks.
+Keep `verify.sh` fast and reliable. It is the repo's smoke-test harness: a flaky one teaches agents to rerun instead of fix, and a slow one makes them run fewer checks.
 
 ## How the hook works
 
@@ -109,7 +105,7 @@ It is always blocked while `.claude/verify.sh` has uncommitted changes, deletion
 | In the post | Here (AGENTS.md unless noted) |
 | --- | --- |
 | Verifying means running the change; if you pick one kind of test, pick end-to-end; use a `verify` skill before committing | Verification 1, Tests 3, the `verify` skill |
-| Give the agent hands and eyes on the running app, guided by a feature map | Docs 5 (`## How to run`), the `verify` skill |
+| Give the agent hands and eyes on the running app | The `verify` skill |
 | Property tests (round-trip, invariants, idempotency, naive vs. optimized) and differential tests | Tests 8 and 9 |
 | A check the change can modify is broken; review criteria (REVIEW.md) come from the default branch | Verification 3, Subagents 2, the hook's `verify.sh` block |
 | Flaky tests are not retried, slept, or skipped; if the cause can't be found, delete with a reason | Verification 5 |
@@ -141,12 +137,11 @@ It is always blocked while `.claude/verify.sh` has uncommitted changes, deletion
 
 ## Keeping it useful
 
-As the post says, turn misses into guardrails, and prune them.
+As the post says, turn misses into guardrails, and prune them. Guardrails here are checks that run, not notes that pile up: written-down lessons get carried into every task and hold back later design.
 
-1. When the same kind of bug gets through twice, add a check that would have caught it: a test, a line in `verify.sh`, or a rule below the END line. A person approves it in a PR.
-2. A `REVIEW.md` on the default branch can give the breaker a checklist: a trigger visible in a diff, and what to try when it matches.
-3. Every PR lists the breaker's results (Git and PRs 4). If it keeps finding nothing on some kind of change, or its unconfirmed items keep turning out real, adjust REVIEW.md.
-4. Rules, checks, and tests only grow if you let them. Delete what no longer catches anything.
+1. When the same kind of bug gets through twice, add a check that would have caught it: a test or a line in `verify.sh`. A person approves it in a PR.
+2. Every PR lists the breaker's results (Git and PRs 4). If it keeps finding nothing, it costs more than it saves.
+3. Rules, checks, and tests only grow if you let them. Delete what no longer catches anything.
 
 ## Working on Lim_claude
 
