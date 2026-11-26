@@ -1,23 +1,32 @@
 ---
 name: verify
-description: Check that a code change actually works by running it, not just by reading it or seeing unit tests pass. Use before committing, before opening or updating a PR, and whenever you are about to say a change is done.
+description: Check that a code change actually works by running it, not just by reading it. Run once per task, after the reviewer's findings are fixed and before committing. Not for merges, rebases, conflict resolution, updates to an open PR, or doc-only changes.
 ---
 
 # Verify
 
-Goal: evidence that the change does what the task asked, gathered by running it.
+Goal: evidence that the change does what the task asked, gathered by running it. This is step 3 of the Order of work in AGENTS.md: once per task, after the review fixes, before the commit. The commit gate runs the project's checks on `git commit`, so this skill does not run them again.
 
-## 1. Run the project's checks
+## When not to run it
 
-1. If `.claude/verify.sh` exists, run it. It is the project's own list of checks.
-2. Otherwise run the build, linter, and tests the project already uses. Find them in the README, CI config, Makefile, or package manifest.
-3. Run the narrowest relevant tests first. Run wider ones if the change touches shared code.
+1. It already ran in this task.
+2. Merging, rebasing, cherry-picking, or resolving conflicts between branches or PRs. Run the project's checks once after the last merge instead (AGENTS.md Verification 7).
+3. Updating an open PR (feedback, a fix after the commit gate failed). Run the tests for the fix. The commit gate runs the rest.
+4. The change touches only docs, comments, or the PR description.
+
+## 1. Checks
+
+1. While working, run only the tests related to the change.
+2. Do not run `.claude/verify.sh` or the full suite yourself before committing. The commit gate runs them on `git commit` and shows you the failures.
+3. Exception: if the repo has no `.claude/verify.sh`, `Cargo.toml`, `go.mod`, `package.json` test script, or pytest config, the gate runs nothing. Then run the build, linter, and tests the project uses once before committing. Find them in the README, CI config, Makefile, or package manifest.
 
 ## 2. Use the change the way a user would
 
-Find the entry point the change affects and use it with realistic input:
+Do this only when the change alters behavior a user or caller can see. For refactors and internal changes, the tests are enough.
 
-1. CLI or binary: run it with real arguments and input, including one bad input.
+Run the affected entry point once with realistic input. Add one bad input only when the change is about handling input.
+
+1. CLI or binary: run it with real arguments and input.
 2. Library: call the public API from a small scratch program, or from a test only if it is worth keeping under the Tests rules in AGENTS.md.
 3. HTTP service: start it locally and call the changed endpoints.
 4. Web UI: open it in a browser, go through the changed flow, and take a screenshot.

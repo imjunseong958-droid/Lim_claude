@@ -1,12 +1,23 @@
+## Order of work
+
+Do each step once per task, in this order. Do not go back to an earlier step.
+
+1. Implement. While working, run only the tests related to the change. Commit in step 4, not before.
+2. Review: spawn one reviewer subagent (Subagents 2). Fix the findings you can confirm.
+3. Verify: follow `.claude/skills/verify/SKILL.md` once, on the code after the review fixes. In Claude Code this is the `verify` skill.
+4. Commit. The commit gate runs this repo's checks on `git commit`. If they fail, fix the code and commit again. Do not redo steps 2 and 3 for that fix.
+5. Push and open the PR (Git and PRs 3 and 4).
+6. Later updates to the PR (feedback, merges, conflict resolution, rebases): make the change, run the related tests, and commit. Do not review or run the verify skill again unless the user asks.
+
 ## Verification
 
 1. Done means you ran the change and saw it work. Passing checks or unit tests alone is not done.
-2. Before committing, follow `.claude/skills/verify/SKILL.md`. In Claude Code this is the `verify` skill. If `.claude/verify.sh` exists, it holds this repo's checks.
+2. The commit gate runs this repo's checks on every `git commit` and blocks the commit if they fail: `.claude/verify.sh` if it exists, otherwise the command `.claude/hooks/commit-gate.sh` picks for the project. Do not run them yourself right before committing, and do not run the same check twice on the same code.
 3. Do not change tests, snapshots or golden files, lint settings, CI config, or `.claude/verify.sh` to make your change pass. Change a test only when the task changes the behavior it checks, and say so in the PR.
 4. Fix warnings your change introduces instead of silencing them.
 5. Flaky tests: do not rerun until green, add sleeps, raise timeouts, or skip them. Find the cause. If you can't, stop and tell the user.
 6. If a check still fails after 3 fix attempts, stop and report what fails, what you tried, and your best guess at the cause.
-7. Do not rerun a passing check without relevant changes.
+7. When merging, rebasing, or combining several branches or PRs, resolve all conflicts first, then run this repo's checks once on the result. The commit gate skips commits made during a merge, cherry-pick, revert, or rebase, so this run is the only check the merged code gets.
 
 ## Tests
 
@@ -31,9 +42,9 @@
 1. For new work, use a short-lived branch from the latest default branch. Reuse the existing branch when continuing a task or PR. Never push directly to the default branch.
 2. Never discard uncommitted work. Commit only the changes made for the task.
 3. Once verification passes, commit, push, and open or update a PR without asking. Ask before force-pushing or merging.
-4. Keep PR descriptions concise: what changed, and how you verified it (commands run, what you saw). If something was not verified, say so and why. Call out any test or config you changed.
+4. Keep PR descriptions concise: what changed, and how you verified it (commands run, what you saw). If something was not verified, say so and why. Call out any test or config you changed, and list the review findings you did not fix.
 
 ## Subagents
 
 1. Do not spawn subagents unless the user asks.
-2. Exception: after the final commit and before opening or updating a PR, spawn one reviewer subagent. Give it the task and the diff against the default branch, not your reasoning or conclusions. Ask it to look for bugs and for tests or checks that were weakened. If the repo has a REVIEW.md, have it read the version on the default branch. Fix the findings you can confirm and list the rest in the PR. Use one reviewer, not several.
+2. Exception: the one reviewer in Order of work step 2, once per task. Give it the task and the whole diff against the default branch, including changes not yet committed and new files, not your reasoning or conclusions. Ask it to look for bugs and for tests or checks that were weakened. If the repo has a REVIEW.md, have it read the version on the default branch. Do not spawn a second reviewer, before or after the PR is open, unless the user asks.

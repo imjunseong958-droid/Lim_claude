@@ -7,6 +7,10 @@
 #   1. .claude/verify.sh in the repo, if it exists and is executable
 #   2. otherwise a guess from the project files (Cargo, Go, npm, pytest)
 #   3. otherwise nothing, and the commit is allowed
+#
+# Skipped (commit allowed without running checks):
+#   - during a merge, cherry-pick, revert, or rebase. AGENTS.md asks for one check run after the last merge instead.
+#   - when the files are the same as at the last pass in this session (amending a message, splitting one change into commits)
 
 set -uo pipefail
 
@@ -31,6 +35,10 @@ if [ -e .claude/verify.sh ] && [ -n "$(git status --porcelain -- .claude/verify.
   exit 2
 fi
 
+for p in MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD rebase-merge rebase-apply; do
+  [ -e "$(git rev-parse --git-path "$p")" ] && exit 0
+done
+
 if [ -x .claude/verify.sh ]; then
   check='./.claude/verify.sh'
 elif [ -f Cargo.toml ]; then
@@ -47,8 +55,20 @@ fi
 
 state="${TMPDIR:-/tmp}/claude-commit-gate-${session//[^A-Za-z0-9_-]/}"
 
+# The files as they are now (ignored files left out), as a git tree id, built in a scratch index.
+tree=""
+if idx=$(mktemp "${TMPDIR:-/tmp}/claude-commit-gate-index.XXXXXX"); then
+  trap 'rm -f "$idx"' EXIT
+  cp "$(git rev-parse --git-path index)" "$idx" 2>/dev/null || rm -f "$idx"   # a copy lets git skip unchanged files
+  tree=$(GIT_INDEX_FILE="$idx" git add -A 2>/dev/null && GIT_INDEX_FILE="$idx" git write-tree 2>/dev/null) || tree=""
+fi
+if [ -n "$tree" ] && [ "$(cat "$state.pass" 2>/dev/null)" = "$tree" ]; then
+  exit 0
+fi
+
 if out=$(bash -c "$check" 2>&1); then
   rm -f "$state"
+  if [ -n "$tree" ]; then echo "$tree" >"$state.pass"; fi
   exit 0
 fi
 

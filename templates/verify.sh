@@ -1,6 +1,6 @@
 #!/bin/sh
 # Copy this to <repo>/.claude/verify.sh, make it executable, and keep only the checks for that repo.
-# The commit-gate hook runs it before every `git commit`, and the verify skill runs it too.
+# The commit-gate hook runs it before `git commit`. Agents are told not to run it again themselves.
 # Keep it fast: build, lint, and the tests that matter. Exit non-zero on failure.
 # Commit changes to this file yourself. The hook blocks Claude from committing them.
 set -e

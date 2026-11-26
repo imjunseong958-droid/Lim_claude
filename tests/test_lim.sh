@@ -98,9 +98,23 @@ git -C "$E" add -A; git -C "$E" commit -qm setup
 cmd=$(jq -r '.hooks.PreToolUse[0].hooks[0].command' "$E/.claude/settings.json")
 echo "{\"session_id\":\"t$$\",\"cwd\":\"$E\",\"tool_input\":{\"command\":\"git commit -m x\"}}" | CLAUDE_PROJECT_DIR="$E" sh -c "$cmd" 2>"$T/e.err"; rc=$?
 check "failing verify.sh blocks commit (rc=2)" '[ $rc -eq 2 ] && grep -q boom "$T/e.err"'
+gate(){ echo "{\"session_id\":\"t$$\",\"cwd\":\"$E\",\"tool_input\":{\"command\":\"git commit -m x\"}}" | CLAUDE_PROJECT_DIR="$E" sh -c "$cmd" 2>>"$T/e.err"; }
+runs(){ wc -l < "$T/e.runs" | tr -d ' '; }
+printf '#!/bin/sh\necho run >> "%s"\n' "$T/e.runs" > "$E/.claude/verify.sh"; git -C "$E" commit -qam counting
+gate; gate; rc=$?
+check "same files after a pass: checks run once" '[ $rc -eq 0 ] && [ "$(runs)" = 1 ]'
+echo x > "$E/new"; gate
+check "a new file: checks run again" '[ "$(runs)" = 2 ]'
+git -C "$E" add new; git -C "$E" commit -qm new
+git -C "$E" checkout -qb side; echo side > "$E/new"; git -C "$E" commit -qam side
+git -C "$E" checkout -q -; echo main > "$E/new"; git -C "$E" commit -qam main
+git -C "$E" merge side >/dev/null 2>&1; echo merged > "$E/new"; git -C "$E" add new
+gate; rc=$?
+check "commit during a merge: checks skipped" '[ $rc -eq 0 ] && [ "$(runs)" = 2 ]'
+git -C "$E" merge --abort
 "$R/lim.sh" uninstall "$E" > "$T/e2.out" 2>&1
 check "uninstall keeps user verify.sh" '[ -x "$E/.claude/verify.sh" ] && grep -q "is yours" "$T/e2.out"'
-rm -f "${TMPDIR:-/tmp}/claude-commit-gate-t$$"
+rm -f "${TMPDIR:-/tmp}/claude-commit-gate-t$$" "${TMPDIR:-/tmp}/claude-commit-gate-t$$.pass"
 
 echo "== F. guards =="
 "$R/lim.sh" install "$R" > "$T/f.out" 2>&1; rc=$?
