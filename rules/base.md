@@ -7,7 +7,9 @@ Do each step once per task, in this order. Do not go back to an earlier step.
 3. Verify: follow `.claude/skills/verify/SKILL.md` once, on the code after the review fixes. In Claude Code this is the `verify` skill.
 4. Commit. The commit gate runs this repo's checks on `git commit`. If they fail, fix the code and commit again. Do not redo steps 2 and 3 for that fix.
 5. Push and open the PR (Git and PRs 3 and 4).
-6. Later updates to the PR (feedback, merges, conflict resolution, rebases): make the change, run the related tests, and commit. Do not review or run the verify skill again unless the user asks.
+6. Merge it without asking (Merging).
+
+Updates after the PR is open (feedback, merging the default branch in, conflict resolution): make the change, run the related tests, and commit. Do not review or run the verify skill again unless the user asks.
 
 ## Verification
 
@@ -17,7 +19,6 @@ Do each step once per task, in this order. Do not go back to an earlier step.
 4. Fix warnings your change introduces instead of silencing them.
 5. Flaky tests: do not rerun until green, add sleeps, raise timeouts, or skip them. Find the cause. If you can't, stop and tell the user.
 6. If a check still fails after 3 fix attempts, stop and report what fails, what you tried, and your best guess at the cause.
-7. When merging, rebasing, or combining several branches or PRs, resolve all conflicts first, then run this repo's checks once on the result. The commit gate skips commits made during a merge, cherry-pick, revert, or rebase, so this run is the only check the merged code gets.
 
 ## Tests
 
@@ -41,8 +42,18 @@ Do each step once per task, in this order. Do not go back to an earlier step.
 
 1. For new work, use a short-lived branch from the latest default branch. Reuse the existing branch when continuing a task or PR. Never push directly to the default branch.
 2. Never discard uncommitted work. Commit only the changes made for the task.
-3. Once verification passes, commit, push, and open or update a PR without asking. Ask before force-pushing or merging.
+3. Once verification passes, commit, push, and open or update a PR without asking. Ask before force-pushing.
 4. Keep PR descriptions concise: what changed, and how you verified it (commands run, what you saw). If something was not verified, say so and why. Call out any test or config you changed, and list the review findings you did not fix.
+
+## Merging
+
+1. Merge the PRs you opened for a task, and the PRs the user asks you to merge, without asking. Do not merge other PRs on your own.
+2. Merge one PR at a time. Before each, merge the latest default branch into the PR branch, resolve any conflicts, and push. Do not rebase it, since that needs a force-push.
+3. Resolve a conflict by keeping what both sides meant to do. Do not drop either side's change to make the conflict go away. If both sides changed the same behavior in different ways and you cannot tell which is right, stop and ask the user.
+4. Check the result once. If the repo runs CI on PRs, wait for it to pass and do not also run the checks locally. Otherwise run this repo's checks locally once: `.claude/verify.sh`, or the command `.claude/hooks/commit-gate.sh` picks, or if neither applies, the project's build and tests. The commit gate skips commits made during a merge, cherry-pick, revert, or rebase, so this is the only check the merged code gets.
+5. If the checks fail, fix the code on the PR branch, commit, and check again. Verification 6 applies.
+6. Do not merge, and tell the user instead, if a person requested changes or left unresolved comments, if you left a review finding unfixed that may be a real bug, or if branch protection blocks the merge. Never bypass branch protection or required checks.
+7. Use the merge method the repo already uses (squash, merge commit, or rebase).
 
 ## Subagents
 

@@ -10,7 +10,7 @@ Goal: evidence that the change does what the task asked, gathered by running it.
 ## When not to run it
 
 1. It already ran in this task.
-2. Merging, rebasing, cherry-picking, or resolving conflicts between branches or PRs. Run the project's checks once after the last merge instead (AGENTS.md Verification 7).
+2. Merging, rebasing, cherry-picking, or resolving conflicts between branches or PRs. AGENTS.md Merging says how the merged result is checked.
 3. Updating an open PR (feedback, a fix after the commit gate failed). Run the tests for the fix. The commit gate runs the rest.
 4. The change touches only docs, comments, or the PR description.
 
