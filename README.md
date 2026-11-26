@@ -1,134 +1,160 @@
 # Lim_claude
 
-코딩 에이전트가 "다 됐어요"라고 말하기 전에 실제로 실행해서 확인하게 만드는 규칙과 도구예요. 레포 안에 설치하고 커밋하면 그 레포를 클론하는 사람 모두가 같은 규칙을 쓰게 돼요.
+Rules and tools that make a coding agent run its change and check it before it says "done". Install it into a repo and commit it, and everyone who clones that repo works under the same rules.
 
-Anthropic 블로그 글 [How the Claude Code team thinks about verification](https://claude.dev/blog/how-the-claude-code-team-thinks-about-verification/)을 참고했어요.
+Based on the Anthropic blog post [How the Claude Code team thinks about verification](https://claude.dev/blog/how-the-claude-code-team-thinks-about-verification/).
 
-## 레포에 설치되는 것
+## What gets installed in a repo
 
-| 위치 | 내용 | 누가 쓰나 |
+| Path | What it is | Used by |
 | --- | --- | --- |
-| `AGENTS.md` | 검증, 테스트, 문서, Git/PR, 서브에이전트 규칙. `Cargo.toml`이 있으면 Rust 규칙도 들어가요 | AGENTS.md를 읽는 모든 에이전트 |
-| `.claude/skills/verify/SKILL.md` | 변경을 실제로 돌려 보고 증거를 남기는 절차 | Claude Code (`verify` 스킬), 다른 에이전트는 AGENTS.md가 이 파일을 가리켜요 |
-| `.claude/hooks/commit-gate.sh` | `git commit` 직전에 검사를 돌리고 실패하면 커밋을 막는 훅 | Claude Code |
-| `.claude/settings.json` | 위 훅 등록 한 줄 | Claude Code |
-| `.claude/lim_claude/` | 설치한 파일 목록(`manifest`)과 원래 있던 AGENTS.md, CLAUDE.md 원본(`*.orig`) | `lim.sh` |
-| `.gitignore` | `.claude/`가 무시되는 레포에서만, Lim_claude 파일과 `.claude/verify.sh`를 추적하게 하는 블록 | git |
+| `AGENTS.md` | Rules for order of work, verification, tests, docs, Git and PRs, merging, and subagents. Rust rules are added when the repo has `Cargo.toml` | Any agent that reads AGENTS.md |
+| `.claude/skills/verify/SKILL.md` | How to run the change and record the evidence | Claude Code (the `verify` skill). Other agents reach it through AGENTS.md |
+| `.claude/hooks/commit-gate.sh` | Blocks `git commit` when the session has not run the verify skill. In a repo without CI, runs the checks before `git push` | Claude Code |
+| `.claude/settings.json` | The hook's registrations | Claude Code |
+| `.claude/lim_claude/` | The list of installed files (`manifest`) and the original AGENTS.md and CLAUDE.md (`*.orig`) | `lim.sh` |
+| `.gitignore` | Only in repos that ignore `.claude/`: a block that keeps the Lim_claude files and `.claude/verify.sh` tracked | git |
 
-### 처음 설치할 때 정리하는 것
+### What the first install cleans up
 
-1. **기존 `AGENTS.md`:** 내용을 `.claude/lim_claude/AGENTS.md.orig`로 옮기고, `AGENTS.md`는 Lim_claude 블록으로 새로 써요. 레포 전용 규칙이 필요하면 블록의 END 줄 아래에 쓰세요. 업데이트해도 그 부분은 유지돼요.
-2. **`CLAUDE.md`, `.claude/CLAUDE.md`:** 지워요. Claude Code는 `CLAUDE.md`가 있으면 `AGENTS.md`를 읽지 않기 때문이에요. 원본은 `.claude/lim_claude/`에 `.orig`로 보관해요.
-3. **`.gitignore`:** `.claude/`가 통째로 무시되고 있으면, 맨 아래에 블록을 추가해서 Lim_claude 파일과 `.claude/verify.sh`만 추적되게 해요. `.claude/worktrees/`, `launch.json`, 다른 스킬 같은 나머지는 계속 무시돼요.
-4. `CLAUDE.local.md`는 개인 파일이라 건드리지 않고 경고만 해요. 이 파일이 있는 사람에게는 Claude Code가 `AGENTS.md`를 읽지 않아요.
+1. **Existing `AGENTS.md`:** its content moves to `.claude/lim_claude/AGENTS.md.orig`, and `AGENTS.md` is rewritten with the Lim_claude block. Put rules specific to the repo below the block's END line. Updates keep that part.
+2. **`CLAUDE.md` and `.claude/CLAUDE.md`:** deleted, because Claude Code does not read `AGENTS.md` when a `CLAUDE.md` exists. The originals are kept in `.claude/lim_claude/` as `.orig`.
+3. **`.gitignore`:** if all of `.claude/` is ignored, a block at the end keeps only the Lim_claude files and `.claude/verify.sh` tracked. Everything else, such as `.claude/worktrees/`, `launch.json`, and other skills, stays ignored.
+4. `CLAUDE.local.md` is personal, so it is left alone with a warning. Claude Code does not read `AGENTS.md` for anyone who has one.
 
-보관한 원본은 커밋되니까, 다른 클론에서 삭제해도 원래대로 돌아와요. `.orig`를 붙여 두는 건 Claude Code가 백업본을 규칙으로 읽지 않게 하려는 거예요.
+The kept originals are committed, so uninstalling from another clone still restores them. The `.orig` suffix keeps Claude Code from reading the backups as rules.
 
-## 사용법
+## Usage
 
-### 1. Lim_claude 받기 (한 번만)
+### 1. Get Lim_claude (once)
 
 ```bash
 git clone https://github.com/imjunseong958-droid/Lim_claude.git ~/Lim_claude
 ```
 
-`jq`가 필요해요. 최근 macOS에는 기본으로 들어 있어요.
+It needs `jq`, which recent macOS ships with.
 
-### 2. 레포에 설치
+### 2. Install into a repo
 
 ```bash
 ~/Lim_claude/lim.sh install ~/code/my-repo
 ```
 
-1. 레포 경로를 여러 개 줄 수 있어요. 생략하면 현재 폴더에 설치해요.
-2. 기존 `AGENTS.md`에 그 레포만의 규칙(도메인 규칙, 금지 사항 등)이 있었다면, `.claude/lim_claude/AGENTS.md.orig`에서 그 절을 END 줄 아래로 다시 옮기세요. Lim_claude 규칙과 겹치는 일반 절(Subagents, Git/PR, 언어 규칙)은 빼도 돼요.
-3. 설치가 끝나면 `git status`로 확인하고 커밋하세요. 커밋해야 팀원에게도 적용돼요.
+1. You can pass several repo paths. With none, it installs into the current directory.
+2. If the old `AGENTS.md` had rules for that repo only (domain rules, things not to do), move those sections from `.claude/lim_claude/AGENTS.md.orig` back below the END line. General sections that Lim_claude already covers (Subagents, Git/PR, language rules) can be dropped.
+3. Check `git status` and commit. Teammates get the rules only once they are committed.
 
-### 3. 업데이트
+### 3. Update
 
 ```bash
 ~/Lim_claude/lim.sh update ~/code/my-repo
 ```
 
-1. Lim_claude를 `git pull`한 뒤 레포에 다시 설치해요.
-2. 바뀐 파일만 고치고, Lim_claude에서 없어진 파일은 레포에서도 지워요.
-3. 레포 안에서 직접 수정한 관리 파일은 덮어쓰지 않고 경고만 해요. 덮어쓰려면 `--force`를 붙이세요.
+1. Runs `git pull` in Lim_claude, then installs into the repo again.
+2. Changes only the files that changed, deletes files Lim_claude no longer has, and adds hook registrations missing from `settings.json`.
+3. Managed files you edited inside the repo are not overwritten; you get a warning. Add `--force` to overwrite them.
 
-### 4. 삭제
+### 4. Uninstall
 
 ```bash
 ~/Lim_claude/lim.sh uninstall ~/code/my-repo
 ```
 
-1. 설치한 파일, `AGENTS.md`의 블록, `settings.json`의 훅 등록, `.gitignore`의 블록을 지워요.
-2. 원래 있던 `AGENTS.md`와 `CLAUDE.md`를 되돌려요. 블록 아래에 쓴 레포 전용 규칙은 원래 `AGENTS.md` 내용 뒤에 붙여서 남겨요.
-3. 그 결과 비게 되는 파일과 폴더도 지워요. 원래 없던 `AGENTS.md`나 `.claude/`는 남지 않아요.
-4. 레포 안에서 수정한 관리 파일과 `.claude/verify.sh`는 남겨요.
+1. Removes the installed files, the block in `AGENTS.md`, the hook registrations in `settings.json`, and the block in `.gitignore`.
+2. Restores the original `AGENTS.md` and `CLAUDE.md`. Rules you wrote below the block are appended to the original `AGENTS.md`.
+3. Removes files and directories left empty. An `AGENTS.md` or `.claude/` that did not exist before is not left behind.
+4. Leaves managed files you edited, and `.claude/verify.sh`.
 
-## 레포마다 할 일: 검사 목록 (`.claude/verify.sh`)
+## Per repo: the checks (`.claude/verify.sh`)
 
-커밋 게이트는 다음 순서로 검사를 골라요.
+The repo's checks run once on the final code, before a PR is opened.
 
-1. 레포에 실행 가능한 `.claude/verify.sh`가 있으면 그걸 돌려요.
-2. 없으면 프로젝트 파일을 보고 정해요.
+1. **Repo without CI config:** the push gate runs them before every `git push` and blocks the push if they fail. Merged code is checked the same way when the agent pushes it.
+2. **Repo with CI:** the agent runs them once before opening the PR, and CI checks the PR. Turn on required status checks for the default branch in branch protection, so the host refuses to merge until CI passes. Agents merge their own PRs, and this is what stops a merge before CI is green.
 
-| 파일 | 돌리는 검사 |
+The checks are `.claude/verify.sh` if it exists. Otherwise the agent finds the build, linter, and tests in the README, CI config, Makefile, or package manifest, and the push gate guesses from the project files:
+
+| File | Check |
 | --- | --- |
 | `Cargo.toml` | `cargo check -q && cargo test -q` |
 | `go.mod` | `go vet ./... && go test ./...` |
-| `package.json` (실제 test 스크립트가 있을 때) | `npm test --silent` |
-| `pytest.ini` 또는 `pyproject.toml`의 `[tool.pytest]` | `python3 -m pytest -q` |
+| `package.json` (with a real test script) | `npm test --silent` |
+| `pytest.ini`, or `[tool.pytest]` in `pyproject.toml` | `python3 -m pytest -q` |
 
-3. 둘 다 해당하지 않으면 커밋을 그대로 통과시켜요.
-
-검사를 직접 정하려면 템플릿을 복사하세요.
+To pick the checks yourself, copy the template:
 
 ```bash
 cp ~/Lim_claude/templates/verify.sh .claude/verify.sh
 ```
 
-1. 그 레포에 맞는 검사만 주석을 풀고, 맨 아래 두 줄을 지워요.
-2. CI가 있는 레포라면 CI와 같은 검사를 넣으세요. 그래야 CI에서만 걸리는 커밋(fmt 위반 등)이 생기지 않아요.
-3. `verify.sh`는 사람이 직접 커밋해야 해요. 커밋되지 않은 `verify.sh` 변경이 있으면 훅이 Claude의 커밋을 막아요.
+1. Uncomment the checks that fit the repo and delete the last two lines.
+2. In a repo with CI, use the same checks as CI, so PRs don't fail only in CI (on formatting, for example).
+3. A person has to commit `verify.sh`. The hook blocks Claude's commits while `verify.sh` has uncommitted changes.
+4. After installing, run it once yourself to see that it passes on that machine. If it fails from the start, the agent cannot push.
 
-## 커밋 게이트 동작
+## How the hook works
 
-1. Claude가 실행하는 Bash 명령에 `git commit`이 있을 때만 동작해요. `git -C dir commit`이나 `git add -A && git commit`도 잡고, `git log --grep commit` 같은 건 무시해요.
-2. 검사가 실패하면 로그 마지막 60줄을 Claude에게 보여 주고 커밋을 막아요.
-3. 같은 세션에서 3번 연속 실패하면 멈추고 사용자에게 보고하라고 알려 줘요. 커밋은 계속 막아요.
-4. 검사가 한 번 통과하면 실패 횟수가 초기화돼요.
-5. `jq`가 없는 컴퓨터에서는 훅이 아무것도 하지 않아요.
-6. 그 컴퓨터에서 검사 자체가 돌지 않으면(툴체인 문제 등) 커밋도 계속 막혀요. 설치한 뒤 `.claude/verify.sh`나 자동 감지 검사를 한 번 직접 돌려서 통과하는지 확인하세요.
+`commit-gate.sh` is registered for three Claude Code events. PostToolUse on the `Skill` tool notes that Claude ran the verify skill. UserPromptSubmit notes that the user typed `/verify`. PreToolUse on Bash gates `git commit` and `git push`, including `git -C dir commit` and `git add -A && git commit && git push`, and ignores commands like `git log --grep commit`.
 
-## 블로그 글에서 가져온 것
+### Commit gate
 
-| 글의 내용 | 반영한 곳 |
+This follows the gate in the blog post. It does not run tests; it checks whether the session ran the verify skill.
+
+1. A commit is allowed if the session ran the `verify` or `code-review` skill, whether Claude called it or the user typed `/verify`.
+2. A commit whose message has `Verified: none (<reason>)` is allowed without it, for a docs-only commit for example.
+3. Otherwise the commit is blocked and Claude is told to run the verify skill first. After two blocks in a session, the next commit is let through, so Claude cannot get stuck. That is safe because the checks still run before the code is pushed or merged.
+4. A commit is always blocked while `.claude/verify.sh` has uncommitted changes, even after two blocks.
+5. Commits during a merge, cherry-pick, revert, or rebase are allowed. AGENTS.md (Merging) says how merged code is checked.
+
+### Push gate
+
+1. Works only in repos without CI config: `.github/workflows/*.yml`, `.gitlab-ci.yml`, `.circleci/config.yml`, `azure-pipelines.yml`, `bitbucket-pipelines.yml`, `.travis.yml`, `Jenkinsfile`, or `.buildkite`.
+2. Runs the checks. If they fail, it shows Claude the last 60 lines of output and blocks the push.
+3. After 3 failures in a row in a session, it tells Claude to stop and report to the user. It keeps blocking.
+4. Does not run the checks again when the files are the same as at the last pass in the session.
+
+### Modes
+
+`LIM_COMMIT_GATE` sets the mode. `enforce` (the default) blocks. `observe` blocks nothing and writes what it would have blocked to `.git/lim-commit-gate.log`. `off` does nothing. When bringing this into a team repo, run it in `observe` for a while and check for false blocks. Start Claude with `LIM_COMMIT_GATE=observe claude`, or put it under `"env"` in `.claude/settings.json` (whole team) or `.claude/settings.local.json` (just you).
+
+Without `jq`, the hook does nothing.
+
+## Taken from the blog post
+
+| In the post | Where it is here |
 | --- | --- |
-| 검증은 변경을 실제로 실행하는 것. 하나만 고르라면 e2e 테스트 | AGENTS.md Verification 1~2번, Tests 3번, `verify` 스킬 |
-| property 테스트, differential 테스트 | AGENTS.md Tests 8번 |
-| 변경이 자기를 판정하는 체크를 고칠 수 있으면 그 체크는 쓸모없음 | AGENTS.md Verification 3번, 훅의 `verify.sh` 변경 차단 |
-| flaky 테스트는 재시도로 넘기지 않음 | AGENTS.md Verification 5번, `verify` 스킬 |
-| 체크가 3번 실패하면 사람을 부름 | AGENTS.md Verification 6번, 훅의 실패 횟수 |
-| 커밋 전에 싼 검사부터, 커밋 게이트 | `commit-gate.sh` |
-| PR에 어떻게 검증했는지 남김. 안 했으면 안 했다고 씀 | AGENTS.md Git and PRs 4번, `verify` 스킬 4번 |
-| 리뷰어는 하나를 다듬어 씀. 리뷰 기준은 기본 브랜치에서 읽음. 최신 커밋만 리뷰 | AGENTS.md Subagents 2번 |
+| Verifying means running the change. If you pick one kind of test, pick end-to-end. Use the verify skill before committing | AGENTS.md Order of work 2, Verification 1, Tests 3, the `verify` skill |
+| Property tests and differential tests | AGENTS.md Tests 8 |
+| If a change can modify the check that judges it, the check is broken | AGENTS.md Verification 3, the hook's block on `verify.sh` changes |
+| Flaky tests are not retried until green; if the cause can't be found, delete the test and write down why | AGENTS.md Verification 5, the `verify` skill |
+| A check still failing after three rounds brings in a person | AGENTS.md Verification 6, the push gate's failure count |
+| Run cheap checks (tests, build, linter) locally before opening a PR | AGENTS.md Order of work 6, Verification 2, the push gate |
+| A commit gate that blocks commits when the session did not run `/verify` or `/code-review`, with off, observe, and enforce modes; a commit can explain why it was not verified; after two blocks the next commit goes through | `commit-gate.sh` |
+| Say in the PR how it was verified, or that it wasn't | AGENTS.md Git and PRs 4, `verify` skill section 4 |
+| Stamp each commit with how it was verified, including "none", so unverified commits can be found | AGENTS.md Git and PRs 5 (the `Verified:` trailer). Find them with `git log --grep='^Verified: none'` |
+| Tune one reviewer instead of adding more. Read the review criteria (REVIEW.md) from the default branch | AGENTS.md Subagents 2 |
+| Review committed code only. A review of an out-of-date commit means nothing | AGENTS.md Order of work 4 |
+| Review and verification rounds build on earlier rounds instead of starting over | AGENTS.md Order of work 5, Subagents 3 |
 
-## 글과 다르게 한 것
+## Where this differs from the post
 
-1. **flaky 테스트:** 글의 팀은 원인을 못 찾으면 테스트를 지우고 이유를 남겨요. 여기서는 멈추고 사람에게 알리게 했어요. 에이전트가 진짜 버그를 flaky로 잘못 보고 지우면, 그게 곧 자기를 판정하는 테스트를 고치는 일이 되기 때문이에요.
-2. **커밋 게이트:** 글의 게이트는 2번 막힌 뒤에는 다음 커밋을 통과시켜요. 여기서는 커밋 뒤에 바로 푸시까지 하니까, 통과시키지 않고 계속 막아요.
+1. **Flaky tests:** as in the post, a test whose cause can't be found is deleted with the reason written down. But a PR that deletes one is not auto-merged; it goes to a person. In the post a person looks at PRs before merging, while here agents merge their own PRs and nobody might see the deletion. This lets a person catch a real bug that the agent mistook for flakiness.
+2. **Commit gate:** it follows the post, with three differences. The reason for skipping verification must be written as `Verified: none (<reason>)`. Commits during a merge or rebase are not gated. A change to `.claude/verify.sh` stays blocked even after two blocks.
+3. **Enforcing the cheap checks:** the post suggests a hook that runs the tests when Claude finishes. Here the hook runs them before `git push`, because Claude opens and merges the PR in the same turn, so "when Claude finishes" would be after the merge. It runs only without CI, because with CI the PR is checked by CI anyway.
 
-## 글에 없이 더한 것
+## Added beyond the post
 
-1. **테스트를 덜 쓰게 하기:** 에이전트는 확인용으로 쓴 테스트를 그대로 남기는 일이 많아요. 구현을 따라 쓴 테스트, mock만 확인하는 테스트, 커버리지용 테스트가 쌓이면 버그는 못 잡고 리팩터링만 어려워져요. 그래서 테스트는 바뀐 동작이나 고친 버그에만 쓰고, 새 테스트는 확인하는 동작을 일부러 깨뜨려서 실패하는 걸 본 뒤에만 남기게 했어요. 한 번 확인하는 건 임시 스크립트로 하고 지워요. e2e·골든 테스트는 그대로 두고, 새 동작도 되도록 이걸로 덮어요. 골든 파일을 다시 만들 때는 diff를 한 줄씩 확인하고 PR에 적어요. (AGENTS.md Tests 절)
-2. **문서를 덜 쓰게 하기:** 아키텍처 개요, 파일별 설명, 작업 요약은 에이전트가 코드를 읽으면 바로 알 수 있는 내용이고, 금방 낡아서 다음 에이전트를 잘못 이끌어요. 그래서 사용자가 요청하지 않으면 새 문서를 만들지 않고, 계획과 검증 보고는 PR 설명에 쓰게 했어요. 변경 때문에 기존 문서가 틀리게 되면 그 부분만 고쳐요. (AGENTS.md Docs 절)
+1. **Fewer tests:** agents often keep the tests they wrote to check something once. Tests that mirror the implementation, check only mocks, or exist for coverage pile up, catch no bugs, and make refactoring harder. So tests are written only for changed behavior or fixed bugs, and a new test is kept only after breaking the behavior it checks and seeing it fail. One-off checks are scratch scripts that get deleted. End-to-end and golden tests stay, and new behavior is covered through them where possible. When golden files are regenerated, each changed line is checked and listed in the PR. (AGENTS.md Tests)
+2. **Fewer docs:** architecture overviews, per-file descriptions, and work summaries tell an agent nothing the code doesn't, and they go stale and mislead the next agent. So no new docs unless the user asks, plans and verification reports go in the PR description, and only the parts of existing docs that a change makes wrong are fixed. (AGENTS.md Docs)
+3. **No duplicated work:** verifying, reviewing, fixing, verifying again from scratch, and verifying again when merging PRs made each task take far too long. So the order is fixed: implement, verify, commit, review, PR, merge. The `verify` skill runs once per task. The full checks run once on the final code. While working, only the related tests run. Review fixes are re-checked by the same reviewer looking at only that diff, and by hand only for the behavior a fix changed. Review stops after 3 rounds (the post sets no limit). Fixes, merges, and conflict resolution after the PR is open get no new review or `verify` run. (AGENTS.md Order of work, Verification 2)
+4. **Auto-merge:** agents merge the PRs they opened without asking. Before merging, the latest default branch is merged into the PR branch, conflicts are resolved, and the merged result must pass CI, or the push gate when there is no CI. Each PR can pass alone and still break when combined, so the check of the merged result stays. The agent does not merge, and tells the user instead, when a conflict needs a judgment call, a person requested changes, a review finding it could not fix may be a real bug, the PR deletes a flaky test, or branch protection blocks the merge. Force-pushes still need the user's approval. (AGENTS.md Merging)
 
-## 이 레포의 구성
+## This repo's layout
 
-| 경로 | 역할 |
+| Path | Role |
 | --- | --- |
 | `lim.sh` | install, update, uninstall |
-| `rules/base.md`, `rules/rust.md` | `AGENTS.md` 블록에 들어가는 규칙 |
-| `skills/`, `hooks/` | 레포의 `.claude/` 아래로 복사되는 파일 |
-| `templates/verify.sh` | 레포별 검사 목록 템플릿 |
-| `tests/test_lim.sh` | `lim.sh` 테스트. 임시 레포를 만들어 설치, 재설치(Lim_claude 쪽 변경 반영 포함), 삭제를 돌려 보고, 삭제 후 레포가 설치 전과 같은지 확인해요. `lim.sh`를 고쳤으면 `tests/test_lim.sh`를 실행하세요 |
+| `rules/base.md`, `rules/rust.md` | The rules that go into the `AGENTS.md` block |
+| `skills/`, `hooks/` | Files copied under the repo's `.claude/` |
+| `templates/verify.sh` | Template for a repo's checks |
+| `tests/test_lim.sh` | Tests for `lim.sh` and the hook. Builds scratch repos, runs install, reinstall (including changes on the Lim_claude side), and uninstall, checks that uninstall leaves the repo as it was, and feeds the hook the events Claude Code sends. Run it after changing `lim.sh` or the hook |
