@@ -248,7 +248,25 @@ install_repo() {
     done
   fi
 
+  if has_ci; then
+    echo "  5. CI"
+    warn "This repo has CI, and agents merge their own PRs once it passes. Make CI a required status check"
+    warn "for the default branch (GitHub: Settings > Rules > Rulesets > Require status checks to pass),"
+    warn "so the host refuses a merge before CI passes. Nothing here can turn that on."
+  fi
+
   echo "  Done. Review with: git -C \"$repo\" status, then commit."
+}
+
+# Whether the repo has CI config: the same files the commit gate looks for.
+has_ci() {
+  local f
+  for f in "$repo"/.github/workflows/*.yml "$repo"/.github/workflows/*.yaml "$repo"/.gitlab-ci.yml \
+           "$repo"/.circleci/config.yml "$repo"/azure-pipelines.yml "$repo"/bitbucket-pipelines.yml \
+           "$repo"/.travis.yml "$repo"/Jenkinsfile "$repo"/.buildkite; do
+    [ -e "$f" ] && return 0
+  done
+  return 1
 }
 
 uninstall_repo() {
