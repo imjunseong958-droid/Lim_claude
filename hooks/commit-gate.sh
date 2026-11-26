@@ -81,6 +81,33 @@ while [[ $rest =~ $opt$msgval ]]; do
   rest=${rest#*"${BASH_REMATCH[0]}"}
 done
 scan+=$rest
+# A quoted string that mentions git is text, as in grep "git commit" or echo '... git push',
+# unless something runs it: a shell's or su's -c before it in the same command (bash -c, sh -ec,
+# su - me -c), eval or exec, or a $( or backquote inside double quotes. Its text is left out, so
+# it is not taken for a call, nor does it use up the blocks after which a commit is let through.
+scan=$(awk '
+  { s = s (NR > 1 ? "\n" : "") $0 }
+  END {
+    out = ""; seg = ""; rest = s
+    while (match(rest, /\\.|["\047]/)) {
+      pre = substr(rest, 1, RSTART - 1); c = substr(rest, RSTART, RLENGTH); rest = substr(rest, RSTART + RLENGTH)
+      if (length(c) > 1) { out = out pre c; seg = seg pre c; continue }
+      out = out pre; seg = seg pre
+      if (match(seg, /.*[;&|(){}`\n]/)) seg = substr(seg, RLENGTH + 1)
+      body = ""; r = rest; closed = 0; end = (c == "\"") ? "\\\\.|\"" : "\047"
+      while (match(r, end)) {
+        if (RLENGTH > 1) { body = body substr(r, 1, RSTART + 1); r = substr(r, RSTART + 2); continue }
+        body = body substr(r, 1, RSTART - 1); r = substr(r, RSTART + 1); closed = 1; break
+      }
+      if (!closed) { out = out c rest; rest = ""; break }
+      rest = r
+      run = seg ~ /(^|[ \t\/])((ba|z|da|k|fi)?sh|su)([ \t]+[^ \t]+)*[ \t]+-[A-Za-z]*c[ \t]*$/ || seg ~ /(^|[ \t])(eval|exec)[ \t]*$/ ||
+            (c == "\"" && (index(body, "$(") || index(body, "`")))
+      piece = (run || body !~ /(^|[^A-Za-z0-9_-])git[ \t]/) ? c body c : c c
+      out = out piece; seg = seg piece
+    }
+    printf "%s", out rest
+  }' <<<"$scan")
 
 # A call of git $1: also `/usr/bin/git $1`, `git -C "/a b" -c k="v w" $1`, `... && git $1`,
 # `bash -c 'git $1'`, `(git $1)` and `git commit;git push`, but not `git commit-tree`. Group 2 is

@@ -86,7 +86,7 @@ Keep `verify.sh` and this section fast and reliable. They are the repo's smoke-t
 
 ## How the hook works
 
-`commit-gate.sh` handles three Claude Code events. PostToolUse on `Skill` and UserPromptSubmit note that the session ran the verify skill (Claude called it, or the user typed `/verify`). PreToolUse on Bash gates `git commit` and `git push` in their usual spellings, including `git -C "/a b"`, `git -c k="v w"`, `/usr/bin/git`, `bash -c '…'`, subshells, and chains with `&&` or `;`. It ignores commands like `git log --grep commit` and `git commit-tree`.
+`commit-gate.sh` handles three Claude Code events. PostToolUse on `Skill` and UserPromptSubmit note that the session ran the verify skill (Claude called it, or the user typed `/verify`). PreToolUse on Bash gates `git commit` and `git push` in their usual spellings, including `git -C "/a b"`, `git -c k="v w"`, `/usr/bin/git`, `bash -c '…'`, subshells, and chains with `&&` or `;`. It ignores commands like `git log --grep commit` and `git commit-tree`, and quoted text that only mentions git, as in `grep -rn "git commit" docs/`, unless a shell's `-c`, `eval`, or `"$(...)"` runs it.
 
 Each command is judged in the checkout it runs in: its starting folder, the `cd` moves before it, and git's `-C`. In a worktree that is the worktree, not the main checkout Claude Code names as the project. A command whose checkout is known only once it runs (it sets `GIT_DIR`, or runs `cd "$(...)"`) is blocked with a request to name the folder.
 
