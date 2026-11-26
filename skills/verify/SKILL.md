@@ -1,15 +1,15 @@
 ---
 name: verify
-description: Check that a code change actually works by running it, not just by reading it. Run once per task, after the reviewer's findings are fixed and before committing. Not for merges, rebases, conflict resolution, updates to an open PR, or doc-only changes.
+description: Check that a code change actually works by running it, not just by reading it. Run once per task, before the first commit. Not for review fixes, merges, rebases, conflict resolution, updates to an open PR, or doc-only changes.
 ---
 
 # Verify
 
-Goal: evidence that the change does what the task asked, gathered by running it. This is step 3 of the Order of work in AGENTS.md: once per task, after the review fixes, before the commit. The commit gate runs the project's checks on `git commit`, so this skill does not run them again.
+Goal: evidence that the change does what the task asked, gathered by running it. This is step 2 of the Order of work in AGENTS.md: once per task, before the first commit. The commit gate runs the project's checks on `git commit`, so this skill does not run them again.
 
 ## When not to run it
 
-1. It already ran in this task.
+1. It already ran in this task. For review fixes, use by hand only the behavior a fix changed (AGENTS.md Order of work 5).
 2. Merging, rebasing, cherry-picking, or resolving conflicts between branches or PRs. AGENTS.md Merging says how the merged result is checked.
 3. Updating an open PR (feedback, a fix after the commit gate failed). Run the tests for the fix. The commit gate runs the rest.
 4. The change touches only docs, comments, or the PR description.

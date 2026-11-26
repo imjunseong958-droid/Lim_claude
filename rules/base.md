@@ -1,13 +1,14 @@
 ## Order of work
 
-Do each step once per task, in this order. Do not go back to an earlier step.
+Do the steps in this order. Each later round builds on the one before it and looks only at what changed since then. Never start a check over from scratch.
 
-1. Implement. While working, run only the tests related to the change. Commit in step 4, not before.
-2. Review: spawn one reviewer subagent (Subagents 2). Fix the findings you can confirm.
-3. Verify: follow `.claude/skills/verify/SKILL.md` once, on the code after the review fixes. In Claude Code this is the `verify` skill.
-4. Commit. The commit gate runs this repo's checks on `git commit`. If they fail, fix the code and commit again. Do not redo steps 2 and 3 for that fix.
-5. Push and open the PR (Git and PRs 3 and 4).
-6. Merge it without asking (Merging).
+1. Implement. While working, run only the tests related to the change. Commit in step 3, not before.
+2. Verify: follow `.claude/skills/verify/SKILL.md` once. In Claude Code this is the `verify` skill.
+3. Commit. The commit gate runs this repo's checks on `git commit`. If they fail, fix the code and commit again.
+4. Review round 1: spawn one reviewer subagent on the committed change (Subagents 2). Do not change the code while it reviews. A review of an out-of-date commit is worthless.
+5. Fix the findings you can confirm and commit the fixes. Then run another round on the fix commits only (Subagents 3). Use by hand again only the behavior a fix changed, not the whole change. Stop when a round finds nothing you need to fix, or after 3 rounds, and list what is left in the PR.
+6. Push and open the PR (Git and PRs 3 and 4).
+7. Merge it without asking (Merging).
 
 Updates after the PR is open (feedback, merging the default branch in, conflict resolution): make the change, run the related tests, and commit. Do not review or run the verify skill again unless the user asks.
 
@@ -58,4 +59,5 @@ Updates after the PR is open (feedback, merging the default branch in, conflict 
 ## Subagents
 
 1. Do not spawn subagents unless the user asks.
-2. Exception: the one reviewer in Order of work step 2, once per task. Give it the task and the whole diff against the default branch, including changes not yet committed and new files, not your reasoning or conclusions. Ask it to look for bugs and for tests or checks that were weakened. If the repo has a REVIEW.md, have it read the version on the default branch. Do not spawn a second reviewer, before or after the PR is open, unless the user asks.
+2. Exception: one reviewer per task, for the review rounds in Order of work. In round 1, give it the task and the diff of your commits against the default branch, not your reasoning or conclusions. Ask it to look for bugs and for tests or checks that were weakened. If the repo has a REVIEW.md, have it read the version on the default branch.
+3. Send later rounds to the same reviewer so it keeps its context (in Claude Code, continue it with SendMessage). Give it only the diff since the commit it last reviewed, and ask whether its findings are fixed and whether the fixes broke anything. If you cannot continue it, start one new reviewer with the earlier findings and that diff. Do not add reviewers for a second opinion, and do not review again after the PR is open unless the user asks.
