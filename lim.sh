@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Lim_claude: put verification rules, a verify skill, and a commit-gate hook into a repo.
+# Lim_claude: put the Lim_claude rules into a repo's AGENTS.md.
 # Everything lands inside the target repo. Commit the result and everyone who clones it gets it.
 
 set -euo pipefail
@@ -7,14 +7,13 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  lim.sh install   [--force] [repo ...]   add or refresh Lim_claude in each repo (default: current dir)
-  lim.sh update    [--force] [repo ...]   git pull Lim_claude, then install
-  lim.sh uninstall [repo ...]             remove everything install added and restore the old AGENTS.md and CLAUDE.md
+  lim.sh install   [repo ...]   add or refresh Lim_claude in each repo (default: current dir)
+  lim.sh update    [repo ...]   git pull Lim_claude, then install
+  lim.sh uninstall [repo ...]   remove everything install added and restore the old AGENTS.md and CLAUDE.md
 
 install takes over AGENTS.md and removes CLAUDE.md (Claude Code skips AGENTS.md while a CLAUDE.md
-exists). The originals are kept under .claude/lim_claude/ and uninstall puts them back.
-
---force  also replace managed files that were edited inside the repo
+exists). The originals are kept under .claude/lim_claude/ and uninstall puts them back. Both also
+remove what older versions installed: the verify skill, the commit-gate hook, and its registration.
 EOF
 }
 
@@ -26,24 +25,9 @@ GI_END='# END Lim_claude'
 STATE_REL=.claude/lim_claude
 MANIFEST_REL=$STATE_REL/manifest
 TAKEOVER="AGENTS.md CLAUDE.md .claude/CLAUDE.md"   # files install replaces or removes; originals are kept
-SETTINGS_REL=.claude/settings.json
-HOOK_REL=.claude/hooks/commit-gate.sh
-HOOK_CMD='"$CLAUDE_PROJECT_DIR"/.claude/hooks/commit-gate.sh'
+SETTINGS_REL=.claude/settings.json   # older versions registered their hook here
 HAS_HOOK='[.hooks[]?[]?.hooks[]?.command // empty | select(contains("commit-gate.sh"))] | length > 0'
-# Adds each commit-gate registration that is missing: the commit/push gate, and the two events
-# that tell it the session ran the verify skill.
-ADD_HOOKS='
-  def reg($ev; $m; $extra):
-    if ([.hooks[$ev][]?.hooks[]?.command // empty | select(contains("commit-gate.sh"))] | length) > 0 then .
-    else .hooks[$ev] = ((.hooks[$ev] // []) + [(if $m == "" then {} else {matcher: $m} end)
-                                              + {hooks: [{type: "command", command: $cmd} + $extra]}])
-    end;
-  .hooks //= {}
-  | reg("PreToolUse"; "Bash"; {timeout: 600})
-  | reg("PostToolUse"; "Skill"; {})
-  | reg("UserPromptSubmit"; ""; {})'
 WORK=""   # scratch directory for this run; made only for commands that write (see the end)
-force=0
 repo=""
 manifest=""
 
@@ -52,7 +36,6 @@ warn()     { printf '     ! %s\n' "$*" >&2; }
 sum()      { cksum <"$1" | awk '{print $1 "-" $2}'; }
 tmpfile()  { mktemp "$WORK/f.XXXXXX"; }
 replace()  { cat "$2" >"$1"; rm -f "$2"; }   # overwrite $1 with $2, keeping $1's permissions
-recorded() { if [ -f "$manifest" ]; then awk -F'\t' -v p="$1" '$1==p {print $2}' "$manifest"; fi; }
 is_git()   { git -C "$repo" rev-parse --git-dir >/dev/null 2>&1; }
 ignored()  { git -C "$repo" check-ignore -q --no-index -- "$1" 2>/dev/null; }
 
@@ -108,7 +91,7 @@ prune() {
   while [ "$d" != "$repo" ] && [ "$d" != / ] && rmdir "$d" 2>/dev/null; do d=$(dirname "$d"); done
 }
 
-# remove_managed PATH SUM: delete a file install wrote, unless it was edited since.
+# remove_managed PATH SUM: delete a file an older install wrote, unless it was edited since.
 remove_managed() {
   local to="$repo/$1"
   if [ ! -e "$to" ]; then return 0; fi
@@ -133,59 +116,52 @@ track_rules() {
   done | awk '!seen[$0]++'
 }
 
+# Older versions copied files into the repo (listed in the manifest) and registered a hook in
+# settings.json. remove_old removes both, keeping files edited since.
+remove_old() {
+  local list trel old settings out found=""
+  if [ -f "$manifest" ]; then
+    list=$(tmpfile)
+    awk -F'\t' '!/^#/ && NF==2' "$manifest" >"$list"
+    while IFS=$'\t' read -r trel old; do
+      remove_managed "$trel" "$old"; found=1
+    done <"$list"
+    rm -f "$list"
+  fi
+  settings="$repo/$SETTINGS_REL"
+  if [ -f "$settings" ] && jq -e "$HAS_HOOK" "$settings" >/dev/null; then
+    out=$(tmpfile)
+    jq '
+      .hooks |= (map_values(map(.hooks |= map(select((.command // "") | contains("commit-gate.sh") | not)))
+                            | map(select(.hooks | length > 0)))
+                 | with_entries(select(.value | length > 0)))
+      | if (.hooks | length) == 0 then del(.hooks) else . end' "$settings" >"$out"
+    if [ "$(jq -c . "$out")" = '{}' ]; then
+      rm -f "$settings" "$out"; say "removed $SETTINGS_REL (nothing else was in it)"
+    else
+      replace "$settings" "$out"; say "unregistered the commit-gate hook in $SETTINGS_REL"
+    fi
+    found=1
+  fi
+  if [ -z "$found" ]; then say "nothing to remove"; fi
+}
+
 # Paths that must be committed for teammates to get Lim_claude.
 shared_paths() {
-  awk -F'\t' '!/^#/ && NF==2 {print $1}' "$manifest"
-  if [ -f "$repo/$SETTINGS_REL" ]; then echo "$SETTINGS_REL"; fi
   echo "$MANIFEST_REL"
-  echo .claude/verify.sh   # the repo's own checks; trackable even before someone writes it
   for p in $TAKEOVER; do
     if [ -e "$repo/$(orig_rel "$p")" ]; then orig_rel "$p"; echo; fi
   done
 }
 
 install_repo() {
-  local version newman list trel from to old content settings out gi rules p
+  local version newman content gi rules p
   repo=$1; manifest="$repo/$MANIFEST_REL"
   version=$(git -C "$SRC" rev-parse --short HEAD 2>/dev/null || echo unknown)
   echo "== install into $repo (Lim_claude $version)"
   mkdir -p "$repo/$STATE_REL"
-  newman=$(tmpfile); list=$(tmpfile)
-  printf '# Lim_claude %s. Written by lim.sh; do not edit.\n' "$version" >"$newman"
 
-  echo "  1. files"
-  (cd "$SRC" && find skills hooks -type f ! -name .DS_Store | sort) >"$list"
-  while IFS= read -r rel; do
-    trel=".claude/$rel"; from="$SRC/$rel"; to="$repo/$trel"; old=$(recorded "$trel")
-    if [ -e "$to" ] && cmp -s "$from" "$to"; then
-      printf '%s\t%s\n' "$trel" "$(sum "$to")" >>"$newman"
-      continue
-    fi
-    if [ -e "$to" ] && [ -z "$old" ]; then
-      warn "$trel already exists and is not managed by Lim_claude; left as is"
-      continue
-    fi
-    if [ -e "$to" ] && [ "$(sum "$to")" != "$old" ] && [ "$force" != 1 ]; then
-      warn "$trel was edited in this repo; left as is (--force replaces it)"
-      printf '%s\t%s\n' "$trel" "$old" >>"$newman"
-      continue
-    fi
-    mkdir -p "$(dirname "$to")"
-    cp "$from" "$to"
-    if [ -x "$from" ]; then chmod +x "$to"; fi
-    printf '%s\t%s\n' "$trel" "$(sum "$to")" >>"$newman"
-    say "wrote $trel"
-  done <"$list"
-  # Files an older Lim_claude installed that no longer exist upstream.
-  if [ -f "$manifest" ]; then
-    awk -F'\t' 'NR==FNR { keep[$1]=1; next } !/^#/ && NF==2 && !($1 in keep)' "$newman" "$manifest" >"$list"
-    while IFS=$'\t' read -r trel old; do
-      remove_managed "$trel" "$old"
-    done <"$list"
-  fi
-  rm -f "$list"
-
-  echo "  2. AGENTS.md and CLAUDE.md"
+  echo "  1. AGENTS.md and CLAUDE.md"
   # The first install takes over AGENTS.md and removes CLAUDE.md, because Claude Code skips
   # AGENTS.md whenever a CLAUDE.md exists. Originals are kept so uninstall can put them back.
   if [ -s "$repo/AGENTS.md" ] && ! grep -qxF "$MD_BEGIN" "$repo/AGENTS.md"; then
@@ -212,23 +188,13 @@ install_repo() {
   if write_block "$repo/AGENTS.md" "$content" "$MD_BEGIN" "$MD_END" top; then say "wrote AGENTS.md"; else say "AGENTS.md is up to date"; fi
   rm -f "$content"
 
-  echo "  3. $SETTINGS_REL"
-  settings="$repo/$SETTINGS_REL"
-  if ! awk -F'\t' -v p="$HOOK_REL" '$1==p {f=1} END {exit !f}' "$newman"; then
-    say "commit-gate.sh is not managed here, so the hook was not registered"
-  else
-    if [ ! -f "$settings" ]; then echo '{}' >"$settings"; fi
-    out=$(tmpfile)
-    jq --arg cmd "$HOOK_CMD" "$ADD_HOOKS" "$settings" >"$out"
-    if [ "$(jq -c . "$out")" = "$(jq -c . "$settings")" ]; then
-      rm -f "$out"; say "commit-gate hook is already registered"
-    else
-      replace "$settings" "$out"; say "registered the commit-gate hook"
-    fi
-  fi
+  echo "  2. what older versions installed"
+  remove_old
+  newman=$(tmpfile)
+  printf '# Lim_claude %s. Written by lim.sh; do not edit.\n' "$version" >"$newman"
   replace "$manifest" "$newman"
 
-  echo "  4. .gitignore"
+  echo "  3. .gitignore"
   gi="$repo/.gitignore"
   if ! is_git; then
     say "not a git repository, so skipped"
@@ -249,16 +215,17 @@ install_repo() {
   fi
 
   if has_ci; then
-    echo "  5. CI"
+    echo "  4. CI"
     warn "This repo has CI, and agents merge their own PRs once it passes. Make CI a required status check"
     warn "for the default branch (GitHub: Settings > Rules > Rulesets > Require status checks to pass),"
-    warn "so the host refuses a merge before CI passes. Nothing here can turn that on."
+    warn "so the host refuses a merge before CI passes. Leave \"Require branches to be up to date\" off,"
+    warn "or every change to the default branch makes each open PR run CI again before it can merge."
   fi
 
   echo "  Done. Review with: git -C \"$repo\" status, then commit."
 }
 
-# Whether the repo has CI config: the same files the commit gate looks for.
+# Whether the repo has CI config.
 has_ci() {
   local f
   for f in "$repo"/.github/workflows/*.yml "$repo"/.github/workflows/*.yaml "$repo"/.gitlab-ci.yml \
@@ -270,23 +237,11 @@ has_ci() {
 }
 
 uninstall_repo() {
-  local list trel old settings out agents orig p to
+  local agents orig p to out
   repo=$1; manifest="$repo/$MANIFEST_REL"
   echo "== uninstall from $repo"
 
-  echo "  1. files"
-  if [ -f "$manifest" ]; then
-    list=$(tmpfile)
-    awk -F'\t' '!/^#/ && NF==2' "$manifest" >"$list"
-    while IFS=$'\t' read -r trel old; do
-      remove_managed "$trel" "$old"
-    done <"$list"
-    rm -f "$list"
-  else
-    say "no manifest, so no managed files"
-  fi
-
-  echo "  2. AGENTS.md and CLAUDE.md"
+  echo "  1. AGENTS.md and CLAUDE.md"
   agents="$repo/AGENTS.md"
   if remove_block "$agents" "$MD_BEGIN" "$MD_END"; then
     if [ -e "$agents" ]; then say "removed the Lim_claude block from AGENTS.md"
@@ -311,29 +266,15 @@ uninstall_repo() {
     say "restored the original $p"
   done
 
-  echo "  3. $SETTINGS_REL"
-  settings="$repo/$SETTINGS_REL"
-  if [ -f "$settings" ] && jq -e "$HAS_HOOK" "$settings" >/dev/null; then
-    out=$(tmpfile)
-    jq '
-      .hooks |= (map_values(map(.hooks |= map(select((.command // "") | contains("commit-gate.sh") | not)))
-                            | map(select(.hooks | length > 0)))
-                 | with_entries(select(.value | length > 0)))
-      | if (.hooks | length) == 0 then del(.hooks) else . end' "$settings" >"$out"
-    if [ "$(jq -c . "$out")" = '{}' ]; then
-      rm -f "$settings" "$out"; say "removed $SETTINGS_REL (nothing else was in it)"
-    else
-      replace "$settings" "$out"; say "unregistered the commit-gate hook"
-    fi
-  fi
+  echo "  2. what older versions installed"
+  remove_old
 
-  echo "  4. .gitignore"
+  echo "  3. .gitignore"
   if remove_block "$repo/.gitignore" "$GI_BEGIN" "$GI_END"; then say "removed the Lim_claude rules"; else say "nothing to change"; fi
 
   rm -f "$manifest"
   prune "$repo/$STATE_REL"
   prune "$repo/.claude"
-  if [ -e "$repo/.claude/verify.sh" ]; then say ".claude/verify.sh is yours, so it was kept"; fi
   echo "  Done. Review with: git -C \"$repo\" status, then commit."
 }
 
@@ -353,7 +294,6 @@ if [ $# -gt 0 ]; then shift; fi
 repos=()
 for a in "$@"; do
   case $a in
-    --force) force=1 ;;
     -h|--help) usage; exit 0 ;;
     -*) echo "unknown option: $a" >&2; usage >&2; exit 1 ;;
     *) repos+=("$a") ;;
