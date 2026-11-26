@@ -250,11 +250,25 @@ for form in $'bash <<\'EOF\'\ngit commit -am x\nEOF' $'cat > notes.txt <<END-MSG
   fresh; iev "$sid" "$I" "$form"; rc=$?
   check "a real commit stays gated: ${form//$'\n'/ \\n }" '[ $rc -eq 2 ]'
 done
+for form in 'grep -rn "git commit" docs/' "echo 'remember to git commit later'" 'git log --grep="git commit" -1' \
+            'grep -c "git commit" notes.txt'; do
+  fresh; iev "$sid" "$I" "$form"; rc=$?
+  check "text that mentions git commit is not a call: $form" '[ $rc -eq 0 ]'
+done
+fresh; iev "$sid" "$I" 'grep -rn "git commit" docs/'; iev "$sid" "$I" "echo 'git commit'"; iev "$sid" "$I" "git commit -am x"; rc=$?
+check "such text does not use up the blocks before a commit is let through" '[ $rc -eq 2 ]'
+for form in "sh -ec 'git commit -am x'" 'bash -l -c "git commit -am x"' 'eval "git commit -am x"' \
+            'echo "$(git commit -am x)"' 'su - me -c "git commit -am x"'; do
+  fresh; iev "$sid" "$I" "$form"; rc=$?
+  check "quoted text that is run stays gated: $form" '[ $rc -eq 2 ]'
+done
 fresh; LIM_COMMIT_GATE=observe iev "$sid" "$W" "git commit -m x"
 check "observe log from a worktree goes to the main .git" 'grep -q no-verify "$I/.git/lim-commit-gate.log"'
 printf '#!/bin/sh\necho worktree-check; exit 1\n' > "$W/.claude/verify.sh"; git -C "$W" commit -qam failing
 fresh; iev "$sid" "$W" "git push"; rc=$?
 check "push from a worktree runs that worktree's checks" '[ $rc -eq 2 ] && grep -q worktree-check "$T/i.err"'
+fresh; iev "$sid" "$W" "grep -rn 'git push' ."; rc=$?
+check "text that mentions git push does not run the checks" '[ $rc -eq 0 ]'
 rm -f "${TMPDIR:-/tmp}"/claude-commit-gate-i*-$$*
 J="$T/j"; mkrepo "$J"; git -C "$J" commit -q --allow-empty -m init
 "$R/lim.sh" install "$J" > "$T/j.out" 2>&1

@@ -1,172 +1,148 @@
 # Lim_claude
 
-Rules and tools that make a coding agent run its change and check it before it says "done". Install it into a repo and commit it, and everyone who clones that repo works under the same rules.
+Rules and tools that make a coding agent run its change and show the evidence before it calls the work done, then merge its own PR. Install it into a repo and commit it, and everyone who clones the repo works under the same rules.
 
-Based on the Anthropic blog post [How the Claude Code team thinks about verification](https://claude.dev/blog/how-the-claude-code-team-thinks-about-verification/).
+Based on the Anthropic post [How the Claude Code team thinks about verification](https://claude.dev/blog/how-the-claude-code-team-thinks-about-verification/), with more weight on running the change than on reading it: the one subagent per task tries to break the change and reports only failures it reproduced.
 
-## What gets installed in a repo
+## What gets installed
 
 | Path | What it is | Used by |
 | --- | --- | --- |
-| `AGENTS.md` | Rules for order of work, verification, tests, docs, Git and PRs, merging, and subagents. Rust rules are added when the repo has `Cargo.toml` | Any agent that reads AGENTS.md |
-| `.claude/skills/verify/SKILL.md` | How to run the change and record the evidence | Claude Code (the `verify` skill). Other agents reach it through AGENTS.md |
-| `.claude/hooks/commit-gate.sh` | Blocks `git commit` when the session has not run the verify skill. In a repo without CI, runs the checks before `git push` | Claude Code |
+| `AGENTS.md` | Rules for order of work, verification, tests, docs, Git and PRs, merging, and subagents, plus Rust rules when the repo has `Cargo.toml` | Any agent that reads AGENTS.md |
+| `.claude/skills/verify/SKILL.md` | How to run the change and report the evidence | Claude Code (the `verify` skill); other agents through AGENTS.md |
+| `.claude/hooks/commit-gate.sh` | Blocks `git commit` until the session ran the verify skill. Without CI, runs the checks before `git push` | Claude Code |
 | `.claude/settings.json` | The hook's registrations | Claude Code |
-| `.claude/lim_claude/` | The list of installed files (`manifest`) and the original AGENTS.md and CLAUDE.md (`*.orig`) | `lim.sh` |
-| `.gitignore` | Only in repos that ignore `.claude/`: a block that keeps the Lim_claude files and `.claude/verify.sh` tracked | git |
+| `.claude/lim_claude/` | The installed-file list (`manifest`) and the original AGENTS.md and CLAUDE.md (`*.orig`) | `lim.sh` |
+| `.gitignore` | Only if `.claude/` is ignored: a block that keeps the Lim_claude files and `.claude/verify.sh` tracked | git |
 
-### What the first install cleans up
+The first install:
 
-1. **Existing `AGENTS.md`:** its content moves to `.claude/lim_claude/AGENTS.md.orig`, and `AGENTS.md` is rewritten with the Lim_claude block. Put rules specific to the repo below the block's END line. Updates keep that part.
-2. **`CLAUDE.md` and `.claude/CLAUDE.md`:** deleted, because Claude Code does not read `AGENTS.md` when a `CLAUDE.md` exists. The originals are kept in `.claude/lim_claude/` as `.orig`.
-3. **`.gitignore`:** if all of `.claude/` is ignored, a block at the end keeps only the Lim_claude files and `.claude/verify.sh` tracked. Everything else, such as `.claude/worktrees/`, `launch.json`, and other skills, stays ignored.
-4. `CLAUDE.local.md` is personal, so it is left alone with a warning. Claude Code does not read `AGENTS.md` for anyone who has one.
+1. Moves an existing `AGENTS.md` to `.claude/lim_claude/AGENTS.md.orig` and rewrites it with the Lim_claude block. Repo-specific rules go below the block's END line, and updates keep them.
+2. Deletes `CLAUDE.md` and `.claude/CLAUDE.md`, keeping them as `.orig`, because Claude Code does not read `AGENTS.md` while a `CLAUDE.md` exists.
+3. If all of `.claude/` is ignored, adds a `.gitignore` block that tracks only the Lim_claude files and `.claude/verify.sh`. The rest, such as `.claude/worktrees/` and `launch.json`, stays ignored.
+4. Leaves `CLAUDE.local.md` alone with a warning: it is personal, and Claude Code does not read `AGENTS.md` for whoever has one.
 
-The kept originals are committed, so uninstalling from another clone still restores them. The `.orig` suffix keeps Claude Code from reading the backups as rules.
+The `.orig` files are committed, so uninstalling from any clone restores them. The suffix keeps Claude Code from reading them as rules.
 
 ## Usage
 
-### 1. Get Lim_claude (once)
+Get it once. It needs `jq`, which recent macOS ships with.
 
 ```bash
 git clone https://github.com/imjunseong958-droid/Lim_claude.git ~/Lim_claude
 ```
 
-It needs `jq`, which recent macOS ships with.
-
-### 2. Install into a repo
+Install into one or more repos (default: the current directory):
 
 ```bash
 ~/Lim_claude/lim.sh install ~/code/my-repo
 ```
 
-1. You can pass several repo paths. With none, it installs into the current directory.
-2. If the old `AGENTS.md` had rules for that repo only (domain rules, things not to do), move those sections from `.claude/lim_claude/AGENTS.md.orig` back below the END line. General sections that Lim_claude already covers (Subagents, Git/PR, language rules) can be dropped.
-3. Check `git status` and commit. Teammates get the rules only once they are committed.
+Then:
 
-### 3. Require CI before a merge (repos with CI)
+1. Move rules specific to the repo from `.claude/lim_claude/AGENTS.md.orig` back below the END line. Drop general sections Lim_claude already covers (subagents, Git/PR, language rules).
+2. Set up the repo's checks (Per repo).
+3. If the repo has CI, make it a required status check: agents merge their own PRs once CI passes, and nothing inside the repo can stop a merge. On GitHub: Settings > Rules > Rulesets > New branch ruleset, target the default branch, turn on **Require status checks to pass**, and add the CI jobs (one job that waits on the others is enough). Other hosts have this under branch protection. `install` reminds you when it finds CI config.
+4. Check `git status` and commit. Teammates get the rules once they are committed.
 
-Agents merge their own PRs once CI passes, and nothing in the repo can stop a merge on its own. Make the host refuse one until CI passes:
-
-1. GitHub: Settings > Rules > Rulesets > New branch ruleset. Target the default branch, turn on **Require status checks to pass**, and add the CI job (or jobs) that must pass. If the workflow has a job that waits on all the others, that one job is enough.
-2. Other hosts have the same setting under branch protection.
-
-`lim.sh install` reminds you of this whenever the repo has CI config. It cannot turn the setting on itself.
-
-### 4. Update
+Update pulls Lim_claude and installs again. It rewrites only changed files, deletes files Lim_claude no longer has, and adds missing hook registrations. Managed files edited in the repo are kept with a warning; `--force` overwrites them.
 
 ```bash
 ~/Lim_claude/lim.sh update ~/code/my-repo
 ```
 
-1. Runs `git pull` in Lim_claude, then installs into the repo again.
-2. Changes only the files that changed, deletes files Lim_claude no longer has, and adds hook registrations missing from `settings.json`.
-3. Managed files you edited inside the repo are not overwritten; you get a warning. Add `--force` to overwrite them.
-
-### 5. Uninstall
+Uninstall removes the installed files and the blocks in `AGENTS.md`, `settings.json`, and `.gitignore`, restores the original `AGENTS.md` (with rules written below the block appended) and `CLAUDE.md`, and removes files and directories left empty, so an `AGENTS.md` or `.claude/` that did not exist before is not left behind. Managed files you edited, and `.claude/verify.sh`, are kept.
 
 ```bash
 ~/Lim_claude/lim.sh uninstall ~/code/my-repo
 ```
 
-1. Removes the installed files, the block in `AGENTS.md`, the hook registrations in `settings.json`, and the block in `.gitignore`.
-2. Restores the original `AGENTS.md` and `CLAUDE.md`. Rules you wrote below the block are appended to the original `AGENTS.md`.
-3. Removes files and directories left empty. An `AGENTS.md` or `.claude/` that did not exist before is not left behind.
-4. Leaves managed files you edited, and `.claude/verify.sh`.
+## Per repo
 
-## Per repo: the checks (`.claude/verify.sh`)
+### The checks: `.claude/verify.sh`
 
-The repo's checks run once on the final code, before a PR is opened.
-
-1. **Repo without CI config:** the push gate runs them before every `git push` and blocks the push if they fail. Merged code is checked the same way when the agent pushes it.
-2. **Repo with CI:** the agent runs them once before opening the PR, and CI checks the PR. Require CI to pass before a merge (Usage 3): agents merge their own PRs, and that setting is what stops a merge before CI is green.
-
-The checks are `.claude/verify.sh` if it exists. Otherwise the agent finds the build, linter, and tests in the README, CI config, Makefile, or package manifest, and the push gate guesses from the project files:
+They run once on the final code before the PR opens: by the push gate on every `git push` in a repo without CI config, or by the agent before opening the PR in a repo with CI, which then checks the PR. Without `verify.sh`, the agent finds the build, linter, and tests in the README, CI config, Makefile, or package manifest, and the push gate guesses:
 
 | File | Check |
 | --- | --- |
 | `Cargo.toml` | `cargo check -q && cargo test -q` |
 | `go.mod` | `go vet ./... && go test ./...` |
-| `package.json` (with a real test script) | `npm test --silent` |
+| `package.json` with a real test script | `npm test --silent` |
 | `pytest.ini`, or `[tool.pytest]` in `pyproject.toml` | `python3 -m pytest -q` |
 
-To pick the checks yourself, copy the template:
+To pick them yourself, copy the template, uncomment what fits, and delete its last two lines:
 
 ```bash
 cp ~/Lim_claude/templates/verify.sh .claude/verify.sh
 ```
 
-1. Uncomment the checks that fit the repo and delete the last two lines.
-2. In a repo with CI, use the same checks as CI, so PRs don't fail only in CI (on formatting, for example).
-3. A person has to commit `verify.sh`. The hook blocks Claude's commits while `verify.sh` has uncommitted changes.
-4. After installing, run it once yourself to see that it passes on that machine. If it fails from the start, the agent cannot push.
+With CI, use the same checks as CI, so PRs don't fail only there. Run it once yourself: if it fails from the start, the agent cannot push. A person commits `verify.sh`; the hook blocks Claude's commits while it has uncommitted changes.
+
+Keep `verify.sh` fast and reliable. It is the repo's smoke-test harness: a flaky one teaches agents to rerun instead of fix, and a slow one makes them run fewer checks.
 
 ## How the hook works
 
-`commit-gate.sh` is registered for three Claude Code events. PostToolUse on the `Skill` tool notes that Claude ran the verify skill. UserPromptSubmit notes that the user typed `/verify`. PreToolUse on Bash gates `git commit` and `git push`, however they are written: `git -C "/a b" commit`, `git -c k="v w" commit`, `/usr/bin/git commit`, `bash -c 'git commit'`, `(git commit)`, `git add -A && git commit && git push`, `git commit;git push`. It ignores commands like `git log --grep commit` and `git commit-tree`.
+`commit-gate.sh` handles three Claude Code events. PostToolUse on `Skill` and UserPromptSubmit note that the session ran the verify skill (Claude called it, or the user typed `/verify`). PreToolUse on Bash gates `git commit` and `git push` in their usual spellings, including `git -C "/a b"`, `git -c k="v w"`, `/usr/bin/git`, `bash -c '…'`, subshells, and chains with `&&` or `;`. It ignores commands like `git log --grep commit` and `git commit-tree`, and quoted text that only mentions git, as in `grep -rn "git commit" docs/`, unless a shell's `-c`, `eval`, or `"$(...)"` runs it.
 
-Each commit and push is judged in the checkout it is made in: the folder the command starts in, with the `cd` moves before it and git's own `-C`. That is a git worktree's own folder, not the main checkout that Claude Code names as the project. A command whose checkout can only be known once it runs, such as one that sets `GIT_DIR` or moves with `cd "$(...)"`, is blocked with a request to name the folder.
+Each command is judged in the checkout it runs in: its starting folder, the `cd` moves before it, and git's `-C`. In a worktree that is the worktree, not the main checkout Claude Code names as the project. A command whose checkout is known only once it runs (it sets `GIT_DIR`, or runs `cd "$(...)"`) is blocked with a request to name the folder.
 
-### Commit gate
+**Commit gate.** As in the post, it checks whether the session ran the verify skill, not the tests. A commit is allowed when:
 
-This follows the gate in the blog post. It does not run tests; it checks whether the session ran the verify skill.
+1. the session ran the `verify` or `code-review` skill;
+2. its message has `Verified: none (<reason>)`, in the command or a `-F` file;
+3. a verified session committed on this branch before, and that work is not on the default branch yet (a fix or PR update, maybe in a new session);
+4. a merge, cherry-pick, revert, or rebase is in progress; or
+5. commits were blocked twice in the session: the next one goes through, so Claude cannot get stuck, and the count starts over. The checks still run before push or merge.
 
-1. A commit is allowed if the session ran the `verify` or `code-review` skill, whether Claude called it or the user typed `/verify`.
-2. A commit whose message has `Verified: none (<reason>)` is allowed without it, for a docs-only commit for example. A message given with `-F file` counts too.
-3. A commit on a branch that already has a commit with a `Verified:` trailer other than `none`, one the default branch does not have, is allowed: the task was verified, and this is a fix or an update to its PR, maybe in a new session.
-4. Otherwise the commit is blocked and Claude is told to run the verify skill first. After two blocks in a session, the next commit is let through, so Claude cannot get stuck. That is safe because the checks still run before the code is pushed or merged.
-5. A commit is always blocked while `.claude/verify.sh` has uncommitted changes, deleting or renaming it included, even after two blocks.
-6. Commits during a merge, cherry-pick, revert, or rebase are allowed. AGENTS.md (Merging) says how merged code is checked.
+It is always blocked while `.claude/verify.sh` has uncommitted changes, deletion or rename included, even after two blocks.
 
-### Push gate
+**Push gate.** Only without CI config (`.github/workflows/*.yml`, `.gitlab-ci.yml`, `.circleci/config.yml`, `azure-pipelines.yml`, `bitbucket-pipelines.yml`, `.travis.yml`, `Jenkinsfile`, `.buildkite`). It runs the checks in the push's checkout and blocks a failing push, showing Claude the last 60 lines. After 3 failures in a row in a session, it tells Claude to stop and report to the user, and keeps blocking. A tree that already passed in the session is not checked again.
 
-1. Works only in repos without CI config: `.github/workflows/*.yml`, `.gitlab-ci.yml`, `.circleci/config.yml`, `azure-pipelines.yml`, `bitbucket-pipelines.yml`, `.travis.yml`, `Jenkinsfile`, or `.buildkite`.
-2. Runs the checks in the checkout the push is made in. If they fail, it shows Claude the last 60 lines of output and blocks the push.
-3. After 3 failures in a row in a session, it tells Claude to stop and report to the user. It keeps blocking.
-4. Does not run the checks again when the files are the same as at the last pass in the session.
+**Modes.** `LIM_COMMIT_GATE=enforce` (default) blocks. `observe` blocks nothing and logs what it would have blocked to `.git/lim-commit-gate.log`. `off` does nothing. In a team repo, start with `observe` and look for false blocks: `LIM_COMMIT_GATE=observe claude`, or `"env"` in `.claude/settings.json` (team) or `.claude/settings.local.json` (you). Without `jq`, the hook does nothing.
 
-### Modes
+## Taken from the post
 
-`LIM_COMMIT_GATE` sets the mode. `enforce` (the default) blocks. `observe` blocks nothing and writes what it would have blocked to `.git/lim-commit-gate.log`. `off` does nothing. When bringing this into a team repo, run it in `observe` for a while and check for false blocks. Start Claude with `LIM_COMMIT_GATE=observe claude`, or put it under `"env"` in `.claude/settings.json` (whole team) or `.claude/settings.local.json` (just you).
-
-Without `jq`, the hook does nothing.
-
-## Taken from the blog post
-
-| In the post | Where it is here |
+| In the post | Here (AGENTS.md unless noted) |
 | --- | --- |
-| Verifying means running the change. If you pick one kind of test, pick end-to-end. Use the verify skill before committing | AGENTS.md Order of work 2, Verification 1, Tests 3, the `verify` skill |
-| Property tests and differential tests | AGENTS.md Tests 8 |
-| If a change can modify the check that judges it, the check is broken | AGENTS.md Verification 3, the hook's block on `verify.sh` changes |
-| Flaky tests are not retried until green; if the cause can't be found, delete the test and write down why | AGENTS.md Verification 5, the `verify` skill |
-| A check still failing after three rounds brings in a person | AGENTS.md Verification 6, the push gate's failure count |
-| Run cheap checks (tests, build, linter) locally before opening a PR | AGENTS.md Order of work 6, Verification 2, the push gate |
-| A commit gate that blocks commits when the session did not run `/verify` or `/code-review`, with off, observe, and enforce modes; a commit can explain why it was not verified; after two blocks the next commit goes through | `commit-gate.sh` |
-| Say in the PR how it was verified, or that it wasn't | AGENTS.md Git and PRs 4, `verify` skill section 4 |
-| Stamp each commit with how it was verified, including "none", so unverified commits can be found | AGENTS.md Git and PRs 5 (the `Verified:` trailer). Find them with `git log --grep='^Verified: none'` |
-| Tune one reviewer instead of adding more. Read the review criteria (REVIEW.md) from the default branch | AGENTS.md Subagents 2 |
-| Review committed code only. A review of an out-of-date commit means nothing | AGENTS.md Order of work 4 |
-| Review and verification rounds build on earlier rounds instead of starting over | AGENTS.md Order of work 5, Subagents 3 |
+| Verifying means running the change; if you pick one kind of test, pick end-to-end; use a `verify` skill before committing | Verification 1, Tests 3, the `verify` skill |
+| Give the agent hands and eyes on the running app | The `verify` skill |
+| Property tests (round-trip, invariants, idempotency, naive vs. optimized) and differential tests | Tests 8 and 9 |
+| A check the change can modify is broken; review criteria (REVIEW.md) come from the default branch | Verification 3, Subagents 2, the hook's `verify.sh` block |
+| Flaky tests are not retried, slept, or skipped; if the cause can't be found, delete with a reason | Verification 5 |
+| Still failing after three rounds: bring in a person | Verification 6, the push gate |
+| Run tests, build, and linter before opening a PR | Verification 2, the push gate |
+| Commit gate on `/verify` or `/code-review`: off/observe/enforce, a reason for skipping, a pass after two blocks | `commit-gate.sh` |
+| Stamp each commit with how it was verified, "none" included | Git and PRs 5. Find unverified commits with `git log --grep='^Verified: none'` |
+| Tune one reviewer instead of stacking more | Subagents: one breaker, no second opinions |
+| A review of an out-of-date commit means nothing | Order of work 5 |
+| Rounds build on earlier rounds | Order of work, Subagents 4 |
+| Pre-existing bugs are not the author's to fix | Subagents 3 |
+| The person defines "done" and reviews the evidence | The agent writes what "done" means before implementing and puts the evidence for each item in the PR, where a person can check it, since it may merge with no one looking (Order of work 1, Git and PRs 4) |
 
 ## Where this differs from the post
 
-1. **Flaky tests:** as in the post, a test whose cause can't be found is deleted with the reason written down. But a PR that deletes one is not auto-merged; it goes to a person. In the post a person looks at PRs before merging, while here agents merge their own PRs and nobody might see the deletion. This lets a person catch a real bug that the agent mistook for flakiness.
-2. **Commit gate:** it follows the post, with three differences. The reason for skipping verification must be written as `Verified: none (<reason>)`. Commits during a merge or rebase are not gated. A change to `.claude/verify.sh` stays blocked even after two blocks.
-3. **Enforcing the cheap checks:** the post suggests a hook that runs the tests when Claude finishes. Here the hook runs them before `git push`, because Claude opens and merges the PR in the same turn, so "when Claude finishes" would be after the merge. It runs only without CI, because with CI the PR is checked by CI anyway.
+1. **A breaker instead of a reviewer.** The post tunes one code reviewer. Here the subagent tries to make the change fail by running it and reports only reproduced failures, and it finds weakened tests by running the old versions against the new code. Findings from reading alone drift into nits and future needs, and each costs a round and can pull the change off course. A reproduced failure is evidence and becomes the regression test. One break round of at most 15 commands, run in the background while the checks run and the PR opens, then one rerun on the fixes.
+2. **Flaky tests:** a PR that deletes one is not auto-merged. In the post a person sees each PR before merge; here nobody might, so a person checks it was not a real bug.
+3. **Commit gate:** skipping needs `Verified: none (<reason>)`, merges and rebases are not gated, and a `verify.sh` change stays blocked after two blocks.
+4. **Cheap checks:** the post suggests running tests when Claude finishes. Claude opens and merges the PR in the same turn, so that would be after the merge. Here the hook runs them before `git push`, and only without CI.
 
 ## Added beyond the post
 
-1. **Fewer tests:** agents often keep the tests they wrote to check something once. Tests that mirror the implementation, check only mocks, or exist for coverage pile up, catch no bugs, and make refactoring harder. So tests are written only for changed behavior or fixed bugs, and a new test is kept only after breaking the behavior it checks and seeing it fail. One-off checks are scratch scripts that get deleted. End-to-end and golden tests stay, and new behavior is covered through them where possible. When golden files are regenerated, each changed line is checked and listed in the PR. (AGENTS.md Tests)
-2. **Fewer docs:** architecture overviews, per-file descriptions, and work summaries tell an agent nothing the code doesn't, and they go stale and mislead the next agent. So no new docs unless the user asks, plans and verification reports go in the PR description, and only the parts of existing docs that a change makes wrong are fixed. (AGENTS.md Docs)
-3. **No duplicated work:** verifying, reviewing, fixing, verifying again from scratch, and verifying again when merging PRs made each task take far too long. So the order is fixed: implement, verify, commit, review, PR, merge. The `verify` skill runs once per task. The full checks run once on the final code. While working, only the related tests run. Review fixes are re-checked by the same reviewer looking at only that diff, and by hand only for the behavior a fix changed. Review stops after 3 rounds (the post sets no limit). Fixes, merges, and conflict resolution after the PR is open get no new review or `verify` run. (AGENTS.md Order of work, Verification 2)
-4. **Auto-merge:** agents merge the PRs they opened without asking. Before merging, the latest default branch is merged into the PR branch, conflicts are resolved, and the merged result must pass CI, or the push gate when there is no CI. Each PR can pass alone and still break when combined, so the check of the merged result stays. The agent does not merge, and tells the user instead, when a conflict needs a judgment call, a person requested changes, a review finding it could not fix may be a real bug, the PR deletes a flaky test, or branch protection blocks the merge. Force-pushes still need the user's approval. (AGENTS.md Merging)
+1. **Auto-merge** (Merging). Agents merge their own PRs. The latest default branch is merged in first and the result checked again, because PRs that pass alone can break together. The agent asks instead on an unclear conflict, requested changes, an unfixed failure the change caused, a deleted flaky test, or branch protection. Force-pushes need approval.
+2. **No duplicated work** (Order of work). Verifying, reviewing, fixing, and verifying again from scratch, then again at merge, made each task take far too long. Each step now runs once, later rounds see only what changed, and PR updates get no new break or verify run.
+3. **Fewer tests** (Tests). Tests that mirror the code, check only mocks, or exist for coverage catch no bugs and make refactoring harder. A test is kept only if breaking its behavior makes it fail.
+4. **Fewer docs** (Docs). Overviews and summaries tell an agent nothing the code doesn't, go stale, and mislead the next agent.
+5. **Invariants checked mechanically** (Tests 9). For logic where a wrong state costs most, an invariant checked over every combination or random operation sequences catches what examples miss, without a model checker.
+6. **Environments** (`verify` skill). A change that depends on where it runs is run in each setting it must support, or the gaps are listed.
 
-## This repo's layout
+## Keeping it useful
 
-| Path | Role |
-| --- | --- |
-| `lim.sh` | install, update, uninstall |
-| `rules/base.md`, `rules/rust.md` | The rules that go into the `AGENTS.md` block |
-| `skills/`, `hooks/` | Files copied under the repo's `.claude/` |
-| `templates/verify.sh` | Template for a repo's checks |
-| `tests/test_lim.sh` | Tests for `lim.sh` and the hook. Builds scratch repos, runs install, reinstall (including changes on the Lim_claude side), and uninstall, checks that uninstall leaves the repo as it was, and feeds the hook the events Claude Code sends. Run it after changing `lim.sh` or the hook |
+As the post says, turn misses into guardrails, and prune them. Guardrails here are checks that run, not notes that pile up: written-down lessons get carried into every task and hold back later design.
+
+1. When the same kind of bug gets through twice, add a check that would have caught it: a test or a line in `verify.sh`. A person approves it in a PR.
+2. Every PR lists the breaker's results (Git and PRs 4). If it keeps finding nothing, it costs more than it saves.
+3. Rules, checks, and tests only grow if you let them. Delete what no longer catches anything.
+
+## Working on Lim_claude
+
+`rules/` becomes the AGENTS.md block; `skills/` and `hooks/` are copied under the repo's `.claude/`. After changing `lim.sh` or the hook, run `tests/test_lim.sh`. It builds scratch repos, runs install, reinstall (including changes on the Lim_claude side), and uninstall, checks that uninstall leaves the repo as it was, and feeds the hook the events Claude Code sends.
