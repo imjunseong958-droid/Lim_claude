@@ -175,6 +175,64 @@ L2="$T/lim2"; mkdir "$L2"; (cd "$R" && tar cf - --exclude .git .) | (cd "$L2" &&
 "$T/limlink/lim.sh" install "$T/limlink" > "$T/h.out" 2>&1; rc=$?
 check "refuses to install into itself through a symlink" '[ $rc -ne 0 ] && grep -q "into itself" "$T/h.out" && [ ! -e "$L2/AGENTS.md" ]'
 
+echo "== I. the checkout a command works in, ways of writing git commit, updates to a PR =="
+I="$T/i"; mkrepo "$I"; git -C "$I" symbolic-ref HEAD refs/heads/main
+"$R/lim.sh" install "$I" >/dev/null 2>&1
+printf '#!/bin/sh\nexit 0\n' > "$I/.claude/verify.sh"; chmod +x "$I/.claude/verify.sh"
+echo a > "$I/f"; git -C "$I" add -A; git -C "$I" commit -qm setup
+W="$T/i-wt"; git -C "$I" worktree add -q -b work "$W"
+S="$T/i sp"; git -C "$I" worktree add -q -b spaced "$S"
+icmd=$(jq -r '.hooks.PreToolUse[0].hooks[0].command' "$I/.claude/settings.json")
+# In a worktree session, Claude Code's project folder is the main checkout; the command runs in the worktree.
+ihook(){ CLAUDE_PROJECT_DIR="$I" sh -c "$icmd" 2>"$T/i.err"; }
+iev(){ jq -n --arg s "$1" --arg c "$2" --arg m "$3" '{hook_event_name:"PreToolUse", session_id:$s, cwd:$c, tool_name:"Bash", tool_input:{command:$m}}' | ihook; }
+iskill(){ jq -n --arg s "$1" '{hook_event_name:"PostToolUse", session_id:$s, tool_name:"Skill", tool_input:{skill:"verify"}}' | ihook; }
+n=0; fresh(){ n=$((n+1)); sid="i$n-$$"; }   # a new session in $sid, with no blocks counted yet
+echo side > "$W/f"; git -C "$W" commit -qam side; echo main > "$I/f"; git -C "$I" commit -qam main
+git -C "$W" merge main >/dev/null 2>&1; echo merged > "$W/f"; git -C "$W" add f
+fresh; iev "$sid" "$W" "git commit --no-edit"; rc=$?
+check "merge commit in a worktree: allowed" '[ $rc -eq 0 ]'
+git -C "$W" merge --abort
+fresh; s=$sid; iskill "$s"; echo "# x" >> "$W/.claude/verify.sh"
+iev "$s" "$W" "git commit -am x"; r1=$?; iev "$s" "$I" "git -C $W commit -am x"; r2=$?
+check "verify.sh edited in the worktree: blocked, also through git -C" '[ $r1 -eq 2 ] && [ $r2 -eq 2 ] && grep -q "verify.sh has uncommitted" "$T/i.err"'
+git -C "$W" checkout -q -- .claude/verify.sh; echo "# mine" >> "$I/.claude/verify.sh"
+iev "$s" "$W" "git commit -m x"; rc=$?
+check "the user's verify.sh edit in the main checkout does not block the worktree" '[ $rc -eq 0 ]'
+git -C "$I" checkout -q -- .claude/verify.sh
+git -C "$W" rm -q .claude/verify.sh; iev "$s" "$W" "git commit -m x"; r1=$?; git -C "$W" reset -q --hard
+git -C "$W" mv .claude/verify.sh .claude/v.bak; iev "$s" "$W" "git commit -m x"; r2=$?; git -C "$W" reset -q --hard
+check "deleting or renaming verify.sh: blocked" '[ $r1 -eq 2 ] && [ $r2 -eq 2 ]'
+for form in '/usr/bin/git commit -m x' "bash -c 'git commit -m x'" "git -C \"$S\" commit -m x" \
+            'git -c user.name="A B" commit -m x' 'git commit;git push' '(git commit)'; do
+  fresh; iev "$sid" "$W" "$form"; rc=$?
+  check "gated: $form" '[ $rc -eq 2 ] && grep -q "has not run the verify skill" "$T/i.err"'
+done
+fresh; iev "$sid" "$W" 'git commit-tree HEAD^{tree} -m x'; r1=$?; fresh; iev "$sid" "$W" 'git log --grep commit'; r2=$?
+check "not gated: git commit-tree, git log --grep commit" '[ $r1 -eq 0 ] && [ $r2 -eq 0 ]'
+printf 'Docs\n\nVerified: none (docs only)\n' > "$W/msg"; printf 'Docs\n' > "$W/bare"
+fresh; iev "$sid" "$W" "git commit -F msg"; r1=$?; fresh; iev "$sid" "$W" "git commit --file=msg"; r2=$?
+fresh; iev "$sid" "$W" "git commit -F bare"; r3=$?
+check "Verified: none in a -F message file: allowed; a file without it: blocked" '[ $r1 -eq 0 ] && [ $r2 -eq 0 ] && [ $r3 -eq 2 ]'
+rm -f "$W/msg" "$W/bare"
+echo w > "$W/g"; git -C "$W" add g; git -C "$W" commit -qm g -m "Verified: cargo test -q passed"
+fresh; iev "$sid" "$W" 'git commit -m fix -m "Verified: the related tests passed"'; rc=$?
+check "update to a verified branch in a new session: allowed" '[ $rc -eq 0 ]'
+echo d > "$S/d"; git -C "$S" add d; git -C "$S" commit -qm d -m "Verified: none (docs only)"
+fresh; iev "$sid" "$S" "git commit -m y"; rc=$?
+check "a branch with only unverified commits: blocked" '[ $rc -eq 2 ]'
+fresh; iev "$sid" "$W" "GIT_DIR=/elsewhere git commit -m x"; r1=$?; fresh; iev "$sid" "$W" 'cd "$(mktemp -d)" && git commit -m x'; r2=$?
+check "a checkout that cannot be told: blocked" '[ $r1 -eq 2 ] && [ $r2 -eq 2 ] && grep -q "cannot tell which checkout" "$T/i.err"'
+printf '#!/bin/sh\necho worktree-check; exit 1\n' > "$W/.claude/verify.sh"; git -C "$W" commit -qam failing
+fresh; iev "$sid" "$W" "git push"; rc=$?
+check "push from a worktree runs that worktree's checks" '[ $rc -eq 2 ] && grep -q worktree-check "$T/i.err"'
+rm -f "${TMPDIR:-/tmp}"/claude-commit-gate-i*-$$*
+J="$T/j"; mkrepo "$J"; git -C "$J" commit -q --allow-empty -m init
+"$R/lim.sh" install "$J" > "$T/j.out" 2>&1
+mkdir -p "$J/.github/workflows"; touch "$J/.github/workflows/ci.yml"
+"$R/lim.sh" install "$J" > "$T/j2.out" 2>&1
+check "install says to require CI only in a repo with CI" '! grep -q "required status check" "$T/j.out" && grep -q "required status check" "$T/j2.out"'
+
 echo
 echo "passed $pass, failed $fail"
 rm -rf "$T"

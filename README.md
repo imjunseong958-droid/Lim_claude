@@ -44,7 +44,16 @@ It needs `jq`, which recent macOS ships with.
 2. If the old `AGENTS.md` had rules for that repo only (domain rules, things not to do), move those sections from `.claude/lim_claude/AGENTS.md.orig` back below the END line. General sections that Lim_claude already covers (Subagents, Git/PR, language rules) can be dropped.
 3. Check `git status` and commit. Teammates get the rules only once they are committed.
 
-### 3. Update
+### 3. Require CI before a merge (repos with CI)
+
+Agents merge their own PRs once CI passes, and nothing in the repo can stop a merge on its own. Make the host refuse one until CI passes:
+
+1. GitHub: Settings > Rules > Rulesets > New branch ruleset. Target the default branch, turn on **Require status checks to pass**, and add the CI job (or jobs) that must pass. If the workflow has a job that waits on all the others, that one job is enough.
+2. Other hosts have the same setting under branch protection.
+
+`lim.sh install` reminds you of this whenever the repo has CI config. It cannot turn the setting on itself.
+
+### 4. Update
 
 ```bash
 ~/Lim_claude/lim.sh update ~/code/my-repo
@@ -54,7 +63,7 @@ It needs `jq`, which recent macOS ships with.
 2. Changes only the files that changed, deletes files Lim_claude no longer has, and adds hook registrations missing from `settings.json`.
 3. Managed files you edited inside the repo are not overwritten; you get a warning. Add `--force` to overwrite them.
 
-### 4. Uninstall
+### 5. Uninstall
 
 ```bash
 ~/Lim_claude/lim.sh uninstall ~/code/my-repo
@@ -70,7 +79,7 @@ It needs `jq`, which recent macOS ships with.
 The repo's checks run once on the final code, before a PR is opened.
 
 1. **Repo without CI config:** the push gate runs them before every `git push` and blocks the push if they fail. Merged code is checked the same way when the agent pushes it.
-2. **Repo with CI:** the agent runs them once before opening the PR, and CI checks the PR. Turn on required status checks for the default branch in branch protection, so the host refuses to merge until CI passes. Agents merge their own PRs, and this is what stops a merge before CI is green.
+2. **Repo with CI:** the agent runs them once before opening the PR, and CI checks the PR. Require CI to pass before a merge (Usage 3): agents merge their own PRs, and that setting is what stops a merge before CI is green.
 
 The checks are `.claude/verify.sh` if it exists. Otherwise the agent finds the build, linter, and tests in the README, CI config, Makefile, or package manifest, and the push gate guesses from the project files:
 
@@ -94,22 +103,25 @@ cp ~/Lim_claude/templates/verify.sh .claude/verify.sh
 
 ## How the hook works
 
-`commit-gate.sh` is registered for three Claude Code events. PostToolUse on the `Skill` tool notes that Claude ran the verify skill. UserPromptSubmit notes that the user typed `/verify`. PreToolUse on Bash gates `git commit` and `git push`, including `git -C dir commit` and `git add -A && git commit && git push`, and ignores commands like `git log --grep commit`.
+`commit-gate.sh` is registered for three Claude Code events. PostToolUse on the `Skill` tool notes that Claude ran the verify skill. UserPromptSubmit notes that the user typed `/verify`. PreToolUse on Bash gates `git commit` and `git push`, however they are written: `git -C "/a b" commit`, `git -c k="v w" commit`, `/usr/bin/git commit`, `bash -c 'git commit'`, `(git commit)`, `git add -A && git commit && git push`, `git commit;git push`. It ignores commands like `git log --grep commit` and `git commit-tree`.
+
+Each commit and push is judged in the checkout it is made in: the folder the command starts in, with the `cd` moves before it and git's own `-C`. That is a git worktree's own folder, not the main checkout that Claude Code names as the project. A command whose checkout can only be known once it runs, such as one that sets `GIT_DIR` or moves with `cd "$(...)"`, is blocked with a request to name the folder.
 
 ### Commit gate
 
 This follows the gate in the blog post. It does not run tests; it checks whether the session ran the verify skill.
 
 1. A commit is allowed if the session ran the `verify` or `code-review` skill, whether Claude called it or the user typed `/verify`.
-2. A commit whose message has `Verified: none (<reason>)` is allowed without it, for a docs-only commit for example.
-3. Otherwise the commit is blocked and Claude is told to run the verify skill first. After two blocks in a session, the next commit is let through, so Claude cannot get stuck. That is safe because the checks still run before the code is pushed or merged.
-4. A commit is always blocked while `.claude/verify.sh` has uncommitted changes, even after two blocks.
-5. Commits during a merge, cherry-pick, revert, or rebase are allowed. AGENTS.md (Merging) says how merged code is checked.
+2. A commit whose message has `Verified: none (<reason>)` is allowed without it, for a docs-only commit for example. A message given with `-F file` counts too.
+3. A commit on a branch that already has a commit with a `Verified:` trailer other than `none`, one the default branch does not have, is allowed: the task was verified, and this is a fix or an update to its PR, maybe in a new session.
+4. Otherwise the commit is blocked and Claude is told to run the verify skill first. After two blocks in a session, the next commit is let through, so Claude cannot get stuck. That is safe because the checks still run before the code is pushed or merged.
+5. A commit is always blocked while `.claude/verify.sh` has uncommitted changes, deleting or renaming it included, even after two blocks.
+6. Commits during a merge, cherry-pick, revert, or rebase are allowed. AGENTS.md (Merging) says how merged code is checked.
 
 ### Push gate
 
 1. Works only in repos without CI config: `.github/workflows/*.yml`, `.gitlab-ci.yml`, `.circleci/config.yml`, `azure-pipelines.yml`, `bitbucket-pipelines.yml`, `.travis.yml`, `Jenkinsfile`, or `.buildkite`.
-2. Runs the checks. If they fail, it shows Claude the last 60 lines of output and blocks the push.
+2. Runs the checks in the checkout the push is made in. If they fail, it shows Claude the last 60 lines of output and blocks the push.
 3. After 3 failures in a row in a session, it tells Claude to stop and report to the user. It keeps blocking.
 4. Does not run the checks again when the files are the same as at the last pass in the session.
 
