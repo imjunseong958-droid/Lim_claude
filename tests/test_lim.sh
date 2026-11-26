@@ -212,17 +212,32 @@ fresh; iev "$sid" "$W" 'git commit-tree HEAD^{tree} -m x'; r1=$?; fresh; iev "$s
 check "not gated: git commit-tree, git log --grep commit" '[ $r1 -eq 0 ] && [ $r2 -eq 0 ]'
 printf 'Docs\n\nVerified: none (docs only)\n' > "$W/msg"; printf 'Docs\n' > "$W/bare"
 fresh; iev "$sid" "$W" "git commit -F msg"; r1=$?; fresh; iev "$sid" "$W" "git commit --file=msg"; r2=$?
-fresh; iev "$sid" "$W" "git commit -F bare"; r3=$?
-check "Verified: none in a -F message file: allowed; a file without it: blocked" '[ $r1 -eq 0 ] && [ $r2 -eq 0 ] && [ $r3 -eq 2 ]'
+fresh; iev "$sid" "$W" "git commit -F bare"; r3=$?; fresh; iev "$sid" "$W" "git commit -aF msg"; r4=$?
+check "Verified: none in a -F message file: allowed; a file without it: blocked" '[ $r1 -eq 0 ] && [ $r2 -eq 0 ] && [ $r3 -eq 2 ] && [ $r4 -eq 0 ]'
+fresh; iev "$sid" "$W" "git commit -am x && grep -n -F AGENTS.md README.md"; rc=$?
+check "a -F of another command is not read as the message" '[ $rc -eq 2 ]'
 rm -f "$W/msg" "$W/bare"
+fresh; iskill "$sid"; iev "$sid" "$W" 'git commit -m g -m "Verified: cargo test -q passed"'; r0=$?
 echo w > "$W/g"; git -C "$W" add g; git -C "$W" commit -qm g -m "Verified: cargo test -q passed"
 fresh; iev "$sid" "$W" 'git commit -m fix -m "Verified: the related tests passed"'; rc=$?
-check "update to a verified branch in a new session: allowed" '[ $rc -eq 0 ]'
-echo d > "$S/d"; git -C "$S" add d; git -C "$S" commit -qm d -m "Verified: none (docs only)"
+check "update, in a new session, to a branch a verified session committed on: allowed" '[ $r0 -eq 0 ] && [ $rc -eq 0 ]'
+echo d > "$S/d"; git -C "$S" add d; git -C "$S" commit -qm d -m "Verified: cargo test -q passed"
 fresh; iev "$sid" "$S" "git commit -m y"; rc=$?
-check "a branch with only unverified commits: blocked" '[ $rc -eq 2 ]'
+check "a branch whose trailers no verified session wrote: blocked" '[ $rc -eq 2 ]'
+git -C "$I" update-ref refs/remotes/origin/main "$(git -C "$W" rev-parse HEAD)"   # merged; local main is stale
+git -C "$W" checkout -q -b next origin/main; fresh; iev "$sid" "$W" "git commit -m start"; r1=$?
+git -C "$W" checkout -q work; git -C "$W" reset -q --hard origin/main; fresh; iev "$sid" "$W" "git commit -m start"; r2=$?
+check "new work from the merged default branch, on a new or a reused branch: blocked" '[ $r1 -eq 2 ] && [ $r2 -eq 2 ]'
 fresh; iev "$sid" "$W" "GIT_DIR=/elsewhere git commit -m x"; r1=$?; fresh; iev "$sid" "$W" 'cd "$(mktemp -d)" && git commit -m x'; r2=$?
 check "a checkout that cannot be told: blocked" '[ $r1 -eq 2 ] && [ $r2 -eq 2 ] && grep -q "cannot tell which checkout" "$T/i.err"'
+fresh; iskill "$sid"
+iev "$sid" "$I" "git commit -m 'Explain why we cd to the repo root' && git push"; r1=$?
+iev "$sid" "$I" 'git commit -m "Document git -C dir commit in the guide"'; r2=$?
+iev "$sid" "$I" 'git add -A && git commit -m "Stop setting GIT_DIR= in the smoke script" && git push'; r3=$?
+iev "$sid" "$I" $'git commit -F - <<\'EOF\'\nWe cd into the project folder.\nEOF\ngit push'; r4=$?
+check "words in a commit message are not read as commands" '[ $r1 -eq 0 ] && [ $r2 -eq 0 ] && [ $r3 -eq 0 ] && [ $r4 -eq 0 ]'
+fresh; LIM_COMMIT_GATE=observe iev "$sid" "$W" "git commit -m x"
+check "observe log from a worktree goes to the main .git" 'grep -q no-verify "$I/.git/lim-commit-gate.log"'
 printf '#!/bin/sh\necho worktree-check; exit 1\n' > "$W/.claude/verify.sh"; git -C "$W" commit -qam failing
 fresh; iev "$sid" "$W" "git push"; rc=$?
 check "push from a worktree runs that worktree's checks" '[ $rc -eq 2 ] && grep -q worktree-check "$T/i.err"'
