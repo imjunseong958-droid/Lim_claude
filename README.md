@@ -113,6 +113,7 @@ cp ~/Lim_claude/templates/verify.sh .claude/verify.sh
 | 체크가 3번 실패하면 사람을 부름 | AGENTS.md Verification 6번, 훅의 실패 횟수 |
 | 커밋 전에 싼 검사부터, 커밋 게이트 | `commit-gate.sh` |
 | PR에 어떻게 검증했는지 남김. 안 했으면 안 했다고 씀 | AGENTS.md Git and PRs 4번, `verify` 스킬 4번 |
+| 커밋마다 어떻게 검증했는지 기록함. 안 했으면 "none"이라고 남겨서 나중에 찾을 수 있게 함 | AGENTS.md Git and PRs 5번 (`Verified:` 트레일러). `git log --grep='^Verified: none'`으로 검증하지 않은 커밋을 찾아요 |
 | 리뷰어를 늘리지 않고 하나를 다듬어 씀. 리뷰 기준(REVIEW.md)은 기본 브랜치에서 읽음 | AGENTS.md Subagents 2번 |
 | 리뷰는 커밋된 코드에 대해서만. 리뷰 중에 코드가 바뀌면 그 결과는 쓸모없음 | AGENTS.md Order of work 4번 |
 | 리뷰와 검증 라운드는 앞 라운드를 이어받고, 처음부터 다시 보지 않음 | AGENTS.md Order of work 5번, Subagents 3번 |

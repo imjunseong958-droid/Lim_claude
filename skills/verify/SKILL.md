@@ -50,4 +50,4 @@ Write down what you ran and what you saw:
 2. What you tried by hand and what happened (screenshots for UI)
 3. What you did not verify, and why
 
-Put this report in the PR description or your reply, not in a file in the repo.
+Put this report in the PR description or your reply, not in a file in the repo, and sum it up in the commit's `Verified:` trailer (AGENTS.md Git and PRs 5).

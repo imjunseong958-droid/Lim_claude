@@ -45,6 +45,7 @@ Updates after the PR is open (feedback, merging the default branch in, conflict 
 2. Never discard uncommitted work. Commit only the changes made for the task.
 3. Once verification passes, commit, push, and open or update a PR without asking. Ask before force-pushing.
 4. Keep PR descriptions concise: what changed, and how you verified it (commands run, what you saw). If something was not verified, say so and why. Call out any test or config you changed, and list the review findings you did not fix.
+5. End every commit message you write with a `Verified:` trailer that says in one line how that commit was checked: the checks you ran and their result, and what you tried by hand. For a review fix, say how you checked the fix. If you did not check it, write `Verified: none` and why, for example `Verified: none (docs only)`. Put it in the trailer block with any other trailers such as `Co-Authored-By`. Merge commits do not need one.
 
 ## Merging
 
