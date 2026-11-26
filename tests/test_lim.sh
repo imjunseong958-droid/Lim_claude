@@ -228,6 +228,13 @@ git -C "$I" update-ref refs/remotes/origin/main "$(git -C "$W" rev-parse HEAD)" 
 git -C "$W" checkout -q -b next origin/main; fresh; iev "$sid" "$W" "git commit -m start"; r1=$?
 git -C "$W" checkout -q work; git -C "$W" reset -q --hard origin/main; fresh; iev "$sid" "$W" "git commit -m start"; r2=$?
 check "new work from the merged default branch, on a new or a reused branch: blocked" '[ $r1 -eq 2 ] && [ $r2 -eq 2 ]'
+git -C "$W" checkout -q -b feat origin/main
+fresh; iskill "$sid"; iev "$sid" "$W" "git commit -m f"; git -C "$W" commit -q --allow-empty -m f
+git -C "$W" checkout -q --detach origin/main; git -C "$W" merge -q --no-ff feat -m merge; git -C "$I" update-ref refs/remotes/origin/main "$(git -C "$W" rev-parse HEAD)"
+git -C "$W" branch -q -D feat; git -C "$W" checkout -q -b feat origin/main; git -C "$W" commit -q --allow-empty -m escape
+fresh; iev "$sid" "$W" "git commit -m more"; rc=$?
+check "a branch name used again after its PR merged: blocked" '[ $rc -eq 2 ]'
+git -C "$W" checkout -q work
 fresh; iev "$sid" "$W" "GIT_DIR=/elsewhere git commit -m x"; r1=$?; fresh; iev "$sid" "$W" 'cd "$(mktemp -d)" && git commit -m x'; r2=$?
 check "a checkout that cannot be told: blocked" '[ $r1 -eq 2 ] && [ $r2 -eq 2 ] && grep -q "cannot tell which checkout" "$T/i.err"'
 fresh; iskill "$sid"
@@ -235,7 +242,14 @@ iev "$sid" "$I" "git commit -m 'Explain why we cd to the repo root' && git push"
 iev "$sid" "$I" 'git commit -m "Document git -C dir commit in the guide"'; r2=$?
 iev "$sid" "$I" 'git add -A && git commit -m "Stop setting GIT_DIR= in the smoke script" && git push'; r3=$?
 iev "$sid" "$I" $'git commit -F - <<\'EOF\'\nWe cd into the project folder.\nEOF\ngit push'; r4=$?
-check "words in a commit message are not read as commands" '[ $r1 -eq 0 ] && [ $r2 -eq 0 ] && [ $r3 -eq 0 ] && [ $r4 -eq 0 ]'
+iev "$sid" "$I" $'git commit -m "$(cat <<\'EOF\'\nSay "hi", then cd into the folder.\nEOF\n)" && git push'; r5=$?
+check "words in a commit message are not read as commands" '[ $r1 -eq 0 ] && [ $r2 -eq 0 ] && [ $r3 -eq 0 ] && [ $r4 -eq 0 ] && [ $r5 -eq 0 ]'
+for form in $'bash <<\'EOF\'\ngit commit -am x\nEOF' $'cat > notes.txt <<END-MSG\nhi\nEND-MSG\ngit commit -am x' \
+            $'echo "use <<EOF for heredocs"\ngit commit -am x' $'echo $((1<<BITS))\ngit commit -am x' \
+            $'free -m\ngit commit -am x' $'git commit -am x\ngrep -n -F AGENTS.md README.md'; do
+  fresh; iev "$sid" "$I" "$form"; rc=$?
+  check "a real commit stays gated: ${form//$'\n'/ \\n }" '[ $rc -eq 2 ]'
+done
 fresh; LIM_COMMIT_GATE=observe iev "$sid" "$W" "git commit -m x"
 check "observe log from a worktree goes to the main .git" 'grep -q no-verify "$I/.git/lim-commit-gate.log"'
 printf '#!/bin/sh\necho worktree-check; exit 1\n' > "$W/.claude/verify.sh"; git -C "$W" commit -qam failing

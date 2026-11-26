@@ -54,17 +54,26 @@ esac
 cmd=$(jq -r '.tool_input.command // ""' <<<"$input")
 cwd=$(jq -r '.cwd // ""' <<<"$input")
 
-# The command as it is read for calls and moves: without heredoc bodies and the values of -m,
-# so that the words of a commit message are not taken for commands. The message itself is read
-# from the command as written.
+# The command as it is read for calls and moves: without the bodies of heredocs that are a commit
+# message (given to git commit -F -, or in $(cat <<...)) and the values of -m, so that the words
+# of a message are not taken for commands. A heredoc given to anything else, a shell among them,
+# is read as it is, and so is one whose end never comes. The message itself is read from the
+# command as written.
 scan=$(awk '
-  skip { t = $0; if (strip) sub(/^\t+/, "", t); if (t == delim) skip = 0; next }
+  skip {
+    t = $0; if (strip) sub(/^\t+/, "", t)
+    if (t == delim) { skip = 0; held = ""; next }
+    held = held $0 "\n"; next
+  }
   { print }
-  match($0, /(^|[^<])<<-?[ \t]*["\047]?[A-Za-z_][A-Za-z0-9_]*["\047]?/) {
+  ($0 ~ /\$\([ \t]*cat[ \t]*<</ || $0 ~ /(-[A-Za-z]*F[ \t]*-|--file[= \t]+-)([ \t;&|)<]|$)/) &&
+  match($0, /(^|[^<])<<-?[ \t]*["\047]?[^ \t;&|<>()"\047]+["\047]?/) {
     d = substr($0, RSTART, RLENGTH); sub(/^[^<]/, "", d)
-    strip = (d ~ /^<<-/); sub(/^<<-?[ \t]*/, "", d); gsub(/["\047]/, "", d); delim = d; skip = 1
-  }' <<<"$cmd")
-opt="(^|[[:space:]])(-[[:alpha:]]*m|--message)([=[:space:]]*)"
+    strip = (d ~ /^<<-/); sub(/^<<-?[ \t]*/, "", d); gsub(/["\047]/, "", d); delim = d; skip = 1; held = ""
+  }
+  END { if (skip) printf "%s", held }' <<<"$cmd")
+# A value starts on the line of its -m: the next line is the next command.
+opt="(^|[[:space:]])(-[[:alpha:]]*m|--message)([=[:blank:]]*)"
 msgval="(\"[^\"]*\"|'[^']*'|[^[:space:];&|()\"']+)"
 rest=$scan scan=""
 while [[ $rest =~ $opt$msgval ]]; do
@@ -179,8 +188,8 @@ collect() {  # $1: kind, $2: its pattern
       seen+=$call$'\n'
     fi
     rest=${rest#*"$whole"}
-    # What git commit is given, up to the end of its command.
-    if [ "$1" = commit ] && [[ ${whole: -1} == [[:space:]] && $rest =~ ^($argpiece|[[:space:]])* ]]; then
+    # What git commit is given, up to the end of its command or its line.
+    if [ "$1" = commit ] && [[ ${whole: -1} == [[:blank:]] && $rest =~ ^($argpiece|[[:blank:]])* ]]; then
       commit_args+=" ${BASH_REMATCH[0]}"
     fi
     rest=${whole: -1}$rest
@@ -270,8 +279,9 @@ remember() {
   grep -qxF "$line" "$log/lim-verified-branches" 2>/dev/null || printf '%s\n' "$line" >>"$log/lim-verified-branches"
 }
 
-# Whether a verified session committed on the branch of checkout $1 before, from a commit its
-# work still builds on, and the work since is not on the default branch yet.
+# Whether a verified session committed on the branch of checkout $1 before, and that commit is
+# among the branch's work the default branch does not have yet: a commit in it whose parent is
+# the noted one. A branch made again under the same name builds on the default branch instead.
 verified_before() {
   local branch head log base b from
   branch=$(git -C "$1" symbolic-ref -q --short HEAD 2>/dev/null) || return 1
@@ -281,8 +291,8 @@ verified_before() {
   base=$(default_branch "$1")
   while IFS=$'\t' read -r b from; do
     [ "$b" = "$branch" ] || continue
-    git -C "$1" merge-base --is-ancestor "$from" "$head" 2>/dev/null || continue
-    [ -n "$(git -C "$1" rev-list -n 1 "$head" "^$from" ${base:+"^$base"} 2>/dev/null)" ] && return 0
+    git -C "$1" rev-list --parents "$head" "^$from" ${base:+"^$base"} 2>/dev/null |
+      awk -v f="$from" '{ for (i = 2; i <= NF; i++) if ($i == f) found = 1 } END { exit !found }' && return 0
   done <"$log/lim-verified-branches"
   return 1
 }
