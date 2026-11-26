@@ -11,7 +11,7 @@ Goal: evidence that the change does what the task asked, gathered by running it.
 
 1. It already ran in this task. For review fixes, use by hand only the behavior a fix changed (AGENTS.md Order of work 5).
 2. Merging, rebasing, cherry-picking, or resolving conflicts between branches or PRs. AGENTS.md Merging says how the merged result is checked.
-3. Updating an open PR (feedback, a fix after checks failed). Run the tests for the fix. CI or the merge check covers the rest.
+3. Updating an open PR (feedback, a fix after checks failed). Run the tests for the fix. CI or the push gate covers the rest.
 4. The change touches only docs, comments, or the PR description. Commit it with `Verified: none (docs only)`.
 
 ## 1. Checks

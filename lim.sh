@@ -29,7 +29,19 @@ TAKEOVER="AGENTS.md CLAUDE.md .claude/CLAUDE.md"   # files install replaces or r
 SETTINGS_REL=.claude/settings.json
 HOOK_REL=.claude/hooks/commit-gate.sh
 HOOK_CMD='"$CLAUDE_PROJECT_DIR"/.claude/hooks/commit-gate.sh'
-HAS_HOOK='[.hooks.PreToolUse[]?.hooks[]?.command // empty | select(contains("commit-gate.sh"))] | length > 0'
+HAS_HOOK='[.hooks[]?[]?.hooks[]?.command // empty | select(contains("commit-gate.sh"))] | length > 0'
+# Adds each commit-gate registration that is missing: the commit/push gate, and the two events
+# that tell it the session ran the verify skill.
+ADD_HOOKS='
+  def reg($ev; $m; $extra):
+    if ([.hooks[$ev][]?.hooks[]?.command // empty | select(contains("commit-gate.sh"))] | length) > 0 then .
+    else .hooks[$ev] = ((.hooks[$ev] // []) + [(if $m == "" then {} else {matcher: $m} end)
+                                              + {hooks: [{type: "command", command: $cmd} + $extra]}])
+    end;
+  .hooks //= {}
+  | reg("PreToolUse"; "Bash"; {timeout: 600})
+  | reg("PostToolUse"; "Skill"; {})
+  | reg("UserPromptSubmit"; ""; {})'
 WORK=""   # scratch directory for this run; made only for commands that write (see the end)
 force=0
 repo=""
@@ -204,18 +216,15 @@ install_repo() {
   settings="$repo/$SETTINGS_REL"
   if ! awk -F'\t' -v p="$HOOK_REL" '$1==p {f=1} END {exit !f}' "$newman"; then
     say "commit-gate.sh is not managed here, so the hook was not registered"
-  elif [ -f "$settings" ] && jq -e "$HAS_HOOK" "$settings" >/dev/null; then
-    say "commit-gate hook is already registered"
   else
     if [ ! -f "$settings" ]; then echo '{}' >"$settings"; fi
     out=$(tmpfile)
-    jq --arg cmd "$HOOK_CMD" '
-      .hooks //= {}
-      | .hooks.PreToolUse = ((.hooks.PreToolUse // [])
-          + [{matcher: "Bash", hooks: [{type: "command", command: $cmd, timeout: 600}]}])' \
-      "$settings" >"$out"
-    replace "$settings" "$out"
-    say "registered the commit-gate hook"
+    jq --arg cmd "$HOOK_CMD" "$ADD_HOOKS" "$settings" >"$out"
+    if [ "$(jq -c . "$out")" = "$(jq -c . "$settings")" ]; then
+      rm -f "$out"; say "commit-gate hook is already registered"
+    else
+      replace "$settings" "$out"; say "registered the commit-gate hook"
+    fi
   fi
   replace "$manifest" "$newman"
 
@@ -289,9 +298,9 @@ uninstall_repo() {
   if [ -f "$settings" ] && jq -e "$HAS_HOOK" "$settings" >/dev/null; then
     out=$(tmpfile)
     jq '
-      .hooks.PreToolUse |= (map(.hooks |= map(select((.command // "") | contains("commit-gate.sh") | not)))
+      .hooks |= (map_values(map(.hooks |= map(select((.command // "") | contains("commit-gate.sh") | not)))
                             | map(select(.hooks | length > 0)))
-      | if (.hooks.PreToolUse | length) == 0 then del(.hooks.PreToolUse) else . end
+                 | with_entries(select(.value | length > 0)))
       | if (.hooks | length) == 0 then del(.hooks) else . end' "$settings" >"$out"
     if [ "$(jq -c . "$out")" = '{}' ]; then
       rm -f "$settings" "$out"; say "removed $SETTINGS_REL (nothing else was in it)"

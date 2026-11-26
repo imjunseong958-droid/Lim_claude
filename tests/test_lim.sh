@@ -21,11 +21,15 @@ check "hook installed and executable" '[ -x "$A/.claude/hooks/commit-gate.sh" ]'
 check "AGENTS.md starts with block and has Rust rules" 'head -1 "$A/AGENTS.md" | grep -q "BEGIN Lim_claude" && grep -q "^## Rust" "$A/AGENTS.md"'
 check "no CLAUDE.md created" '[ ! -e "$A/CLAUDE.md" ]'
 check "settings has hook" 'jq -e ".hooks.PreToolUse[0].hooks[0].command == \"\\\"\$CLAUDE_PROJECT_DIR\\\"/.claude/hooks/commit-gate.sh\"" "$A/.claude/settings.json" >/dev/null'
+check "hook registered for Bash, Skill, and prompts" 'jq -e "[.hooks.PreToolUse[0].matcher, .hooks.PostToolUse[0].matcher, (.hooks.UserPromptSubmit[0].hooks[0].command | contains(\"commit-gate.sh\"))] == [\"Bash\", \"Skill\", true]" "$A/.claude/settings.json" >/dev/null'
 check "manifest lists 2 files" '[ "$(grep -vc "^#" "$A/$ST/manifest")" -eq 2 ]'
 check "no .gitignore needed" '[ ! -e "$A/.gitignore" ]'
 after1=$(snap "$A")
 "$R/lim.sh" install "$A" > "$T/a2.out" 2>&1
 check "reinstall changes nothing" '[ "$(snap "$A")" = "$after1" ]'
+jq '.hooks |= {PreToolUse}' "$A/.claude/settings.json" > "$T/old.json"; cp "$T/old.json" "$A/.claude/settings.json"   # an install from before the Skill and prompt hooks
+"$R/lim.sh" install "$A" > "$T/a4.out" 2>&1
+check "reinstall adds the missing hook registrations" '[ "$(snap "$A")" = "$after1" ] && grep -q "registered the commit-gate hook" "$T/a4.out"'
 "$R/lim.sh" uninstall "$A" > "$T/a3.out" 2>&1
 check "uninstall restores repo exactly" '[ "$(snap "$A")" = "$before" ]'
 check "no .claude dir left" '[ ! -e "$A/.claude" ]'
@@ -96,39 +100,53 @@ E="$T/e"; mkrepo "$E"; git -C "$E" commit -q --allow-empty -m init
 printf '#!/bin/sh\nexit 0\n' > "$E/.claude/verify.sh"; chmod +x "$E/.claude/verify.sh"
 git -C "$E" add -A; git -C "$E" commit -qm setup
 cmd=$(jq -r '.hooks.PreToolUse[0].hooks[0].command' "$E/.claude/settings.json")
-echo '{"type":"user","message":{"role":"user","content":"fix the parser"}}' > "$T/plain.jsonl"
-echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Skill","input":{"skill":"verify"}}]}}' > "$T/skill.jsonl"
-echo '{"type":"user","message":{"role":"user","content":"<command-message>verify</command-message>\n<command-name>/verify</command-name>"}}' > "$T/slash.jsonl"
-gate(){  # session, transcript, [commit command]
-  jq -n --arg s "$1" --arg c "$E" --arg t "$2" --arg m "${3:-git commit -m x}" '{session_id:$s, cwd:$c, transcript_path:$t, tool_input:{command:$m}}' \
-    | CLAUDE_PROJECT_DIR="$E" sh -c "$cmd" 2>"$T/e.err"
-}
-gate s1-$$ "$T/plain.jsonl"; rc=$?
+hook(){ CLAUDE_PROJECT_DIR="$E" sh -c "$cmd" 2>"$T/e.err"; }   # event JSON on stdin, as Claude Code sends it
+bash_ev(){ jq -n --arg s "$1" --arg c "$E" --arg m "$2" '{hook_event_name:"PreToolUse", session_id:$s, cwd:$c, tool_name:"Bash", tool_input:{command:$m}}' | hook; }
+skill_ev(){ jq -n --arg s "$1" --arg k "$2" '{hook_event_name:"PostToolUse", session_id:$s, tool_name:"Skill", tool_input:{skill:$k}}' | hook; }
+prompt_ev(){ jq -n --arg s "$1" --arg p "$2" '{hook_event_name:"UserPromptSubmit", session_id:$s, prompt:$p}' | hook; }
+commit="git commit -m x"
+bash_ev s1-$$ "$commit"; rc=$?
 check "no verify in the session: commit blocked (rc=2)" '[ $rc -eq 2 ] && grep -q "has not run the verify skill" "$T/e.err"'
-gate s1-$$ "$T/plain.jsonl"; r2=$?; gate s1-$$ "$T/plain.jsonl"; r3=$?
+bash_ev s1-$$ "$commit"; r2=$?; bash_ev s1-$$ "$commit"; r3=$?
 check "after two blocks the next commit goes through" '[ $r2 -eq 2 ] && [ $r3 -eq 0 ]'
-gate s2-$$ "$T/skill.jsonl"; rc=$?
-check "verify skill in the transcript: allowed" '[ $rc -eq 0 ]'
-gate s3-$$ "$T/slash.jsonl"; rc=$?
-check "/verify typed by the user: allowed" '[ $rc -eq 0 ]'
-gate s4-$$ "$T/plain.jsonl" 'git commit -m Docs -m "Verified: none (docs only)"'; rc=$?
-gate s4-$$ "$T/plain.jsonl" 'git commit -m Docs -m "Verified: none"'; r2=$?
-check "Verified: none with a reason allowed, without one blocked" '[ $rc -eq 0 ] && [ $r2 -eq 2 ]'
-echo "# edited" >> "$E/.claude/verify.sh"; gate s5-$$ "$T/skill.jsonl"; rc=$?
+skill_ev s2-$$ verify; bash_ev s2-$$ "$commit"; rc=$?
+check "Claude ran the verify skill: commit allowed" '[ $rc -eq 0 ]'
+prompt_ev s3-$$ "verify it works"; bash_ev s3-$$ "$commit"; r1=$?
+pout=$(prompt_ev s3-$$ "/verify"); bash_ev s3-$$ "$commit"; r2=$?
+check "user typed /verify: commit allowed (a prompt that only mentions verify is not)" '[ $r1 -eq 2 ] && [ $r2 -eq 0 ]'
+check "prompt hook prints nothing into Claude's context" '[ -z "$pout" ]'
+bash_ev s4-$$ 'git commit -m Docs -m "Verified: none (docs only)"'; r1=$?
+bash_ev s4-$$ 'git commit -m Docs -m "Verified: none"'; r2=$?
+check "Verified: none with a reason allowed, without one blocked" '[ $r1 -eq 0 ] && [ $r2 -eq 2 ]'
+skill_ev s5-$$ verify; echo "# edited" >> "$E/.claude/verify.sh"; bash_ev s5-$$ "$commit"; rc=$?
 check "uncommitted verify.sh change blocks even after verify" '[ $rc -eq 2 ] && grep -q "verify.sh has uncommitted" "$T/e.err"'
 git -C "$E" checkout -q -- .claude/verify.sh
 echo x > "$E/f"; git -C "$E" add f; git -C "$E" commit -qm f
 git -C "$E" checkout -qb side; echo side > "$E/f"; git -C "$E" commit -qam side
 git -C "$E" checkout -q -; echo main > "$E/f"; git -C "$E" commit -qam main
 git -C "$E" merge side >/dev/null 2>&1; echo merged > "$E/f"; git -C "$E" add f
-gate s6-$$ "$T/plain.jsonl"; rc=$?
+bash_ev s6-$$ "$commit"; rc=$?
 check "commit during a merge: allowed" '[ $rc -eq 0 ]'
 git -C "$E" merge --abort
-LIM_COMMIT_GATE=observe gate s7-$$ "$T/plain.jsonl"; rc=$?
+LIM_COMMIT_GATE=observe bash_ev s7-$$ "$commit"; rc=$?
 check "observe mode logs instead of blocking" '[ $rc -eq 0 ] && grep -q no-verify "$E/.git/lim-commit-gate.log"'
+printf '#!/bin/sh\necho boom; exit 1\n' > "$E/.claude/verify.sh"; git -C "$E" commit -qam failing-check
+bash_ev s8-$$ "git push"; rc=$?
+check "failing check blocks push (rc=2)" '[ $rc -eq 2 ] && grep -q boom "$T/e.err"'
+skill_ev s9-$$ verify; bash_ev s9-$$ "$commit && git push"; rc=$?
+check "commit && push in one command: push still gated" '[ $rc -eq 2 ] && grep -q "Push blocked" "$T/e.err"'
+mkdir -p "$E/.github/workflows"; touch "$E/.github/workflows/ci.yml"; bash_ev s10-$$ "git push"; rc=$?
+check "repo with CI: push not gated" '[ $rc -eq 0 ]'
+rm -r "$E/.github"
+runs(){ wc -l < "$T/e.runs" | tr -d ' '; }
+printf '#!/bin/sh\necho run >> "%s"\n' "$T/e.runs" > "$E/.claude/verify.sh"; git -C "$E" commit -qam counting
+bash_ev s11-$$ "git push"; bash_ev s11-$$ "git push"; rc=$?
+check "same files after a pass: checks run once" '[ $rc -eq 0 ] && [ "$(runs)" = 1 ]'
+echo y > "$E/new"; bash_ev s11-$$ "git push"
+check "changed files: checks run again" '[ "$(runs)" = 2 ]'
 "$R/lim.sh" uninstall "$E" > "$T/e2.out" 2>&1
 check "uninstall keeps user verify.sh" '[ -x "$E/.claude/verify.sh" ] && grep -q "is yours" "$T/e2.out"'
-rm -f "${TMPDIR:-/tmp}"/claude-commit-gate-s[1-7]-$$
+rm -f "${TMPDIR:-/tmp}"/claude-commit-gate-s*-$$*
 
 echo "== F. guards =="
 "$R/lim.sh" install "$R" > "$T/f.out" 2>&1; rc=$?
