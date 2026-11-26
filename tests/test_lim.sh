@@ -93,28 +93,42 @@ check "uninstall: original first, then repo rules" '[ "$(cat "$D/AGENTS.md")" = 
 echo "== E. registered hook command runs from settings =="
 E="$T/e"; mkrepo "$E"; git -C "$E" commit -q --allow-empty -m init
 "$R/lim.sh" install "$E" >/dev/null 2>&1
-printf '#!/bin/sh\necho boom; exit 1\n' > "$E/.claude/verify.sh"; chmod +x "$E/.claude/verify.sh"
+printf '#!/bin/sh\nexit 0\n' > "$E/.claude/verify.sh"; chmod +x "$E/.claude/verify.sh"
 git -C "$E" add -A; git -C "$E" commit -qm setup
 cmd=$(jq -r '.hooks.PreToolUse[0].hooks[0].command' "$E/.claude/settings.json")
-echo "{\"session_id\":\"t$$\",\"cwd\":\"$E\",\"tool_input\":{\"command\":\"git commit -m x\"}}" | CLAUDE_PROJECT_DIR="$E" sh -c "$cmd" 2>"$T/e.err"; rc=$?
-check "failing verify.sh blocks commit (rc=2)" '[ $rc -eq 2 ] && grep -q boom "$T/e.err"'
-gate(){ echo "{\"session_id\":\"t$$\",\"cwd\":\"$E\",\"tool_input\":{\"command\":\"git commit -m x\"}}" | CLAUDE_PROJECT_DIR="$E" sh -c "$cmd" 2>>"$T/e.err"; }
-runs(){ wc -l < "$T/e.runs" | tr -d ' '; }
-printf '#!/bin/sh\necho run >> "%s"\n' "$T/e.runs" > "$E/.claude/verify.sh"; git -C "$E" commit -qam counting
-gate; gate; rc=$?
-check "same files after a pass: checks run once" '[ $rc -eq 0 ] && [ "$(runs)" = 1 ]'
-echo x > "$E/new"; gate
-check "a new file: checks run again" '[ "$(runs)" = 2 ]'
-git -C "$E" add new; git -C "$E" commit -qm new
-git -C "$E" checkout -qb side; echo side > "$E/new"; git -C "$E" commit -qam side
-git -C "$E" checkout -q -; echo main > "$E/new"; git -C "$E" commit -qam main
-git -C "$E" merge side >/dev/null 2>&1; echo merged > "$E/new"; git -C "$E" add new
-gate; rc=$?
-check "commit during a merge: checks skipped" '[ $rc -eq 0 ] && [ "$(runs)" = 2 ]'
+echo '{"type":"user","message":{"role":"user","content":"fix the parser"}}' > "$T/plain.jsonl"
+echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Skill","input":{"skill":"verify"}}]}}' > "$T/skill.jsonl"
+echo '{"type":"user","message":{"role":"user","content":"<command-message>verify</command-message>\n<command-name>/verify</command-name>"}}' > "$T/slash.jsonl"
+gate(){  # session, transcript, [commit command]
+  jq -n --arg s "$1" --arg c "$E" --arg t "$2" --arg m "${3:-git commit -m x}" '{session_id:$s, cwd:$c, transcript_path:$t, tool_input:{command:$m}}' \
+    | CLAUDE_PROJECT_DIR="$E" sh -c "$cmd" 2>"$T/e.err"
+}
+gate s1-$$ "$T/plain.jsonl"; rc=$?
+check "no verify in the session: commit blocked (rc=2)" '[ $rc -eq 2 ] && grep -q "has not run the verify skill" "$T/e.err"'
+gate s1-$$ "$T/plain.jsonl"; r2=$?; gate s1-$$ "$T/plain.jsonl"; r3=$?
+check "after two blocks the next commit goes through" '[ $r2 -eq 2 ] && [ $r3 -eq 0 ]'
+gate s2-$$ "$T/skill.jsonl"; rc=$?
+check "verify skill in the transcript: allowed" '[ $rc -eq 0 ]'
+gate s3-$$ "$T/slash.jsonl"; rc=$?
+check "/verify typed by the user: allowed" '[ $rc -eq 0 ]'
+gate s4-$$ "$T/plain.jsonl" 'git commit -m Docs -m "Verified: none (docs only)"'; rc=$?
+gate s4-$$ "$T/plain.jsonl" 'git commit -m Docs -m "Verified: none"'; r2=$?
+check "Verified: none with a reason allowed, without one blocked" '[ $rc -eq 0 ] && [ $r2 -eq 2 ]'
+echo "# edited" >> "$E/.claude/verify.sh"; gate s5-$$ "$T/skill.jsonl"; rc=$?
+check "uncommitted verify.sh change blocks even after verify" '[ $rc -eq 2 ] && grep -q "verify.sh has uncommitted" "$T/e.err"'
+git -C "$E" checkout -q -- .claude/verify.sh
+echo x > "$E/f"; git -C "$E" add f; git -C "$E" commit -qm f
+git -C "$E" checkout -qb side; echo side > "$E/f"; git -C "$E" commit -qam side
+git -C "$E" checkout -q -; echo main > "$E/f"; git -C "$E" commit -qam main
+git -C "$E" merge side >/dev/null 2>&1; echo merged > "$E/f"; git -C "$E" add f
+gate s6-$$ "$T/plain.jsonl"; rc=$?
+check "commit during a merge: allowed" '[ $rc -eq 0 ]'
 git -C "$E" merge --abort
+LIM_COMMIT_GATE=observe gate s7-$$ "$T/plain.jsonl"; rc=$?
+check "observe mode logs instead of blocking" '[ $rc -eq 0 ] && grep -q no-verify "$E/.git/lim-commit-gate.log"'
 "$R/lim.sh" uninstall "$E" > "$T/e2.out" 2>&1
 check "uninstall keeps user verify.sh" '[ -x "$E/.claude/verify.sh" ] && grep -q "is yours" "$T/e2.out"'
-rm -f "${TMPDIR:-/tmp}/claude-commit-gate-t$$" "${TMPDIR:-/tmp}/claude-commit-gate-t$$.pass"
+rm -f "${TMPDIR:-/tmp}"/claude-commit-gate-s[1-7]-$$
 
 echo "== F. guards =="
 "$R/lim.sh" install "$R" > "$T/f.out" 2>&1; rc=$?

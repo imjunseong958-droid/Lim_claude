@@ -1,26 +1,32 @@
 #!/usr/bin/env bash
 # Claude Code PreToolUse hook (matcher: Bash).
-# Runs the project's checks before any `git commit` and blocks the commit if they fail.
+# Blocks `git commit` when this session has not run the verify skill.
 # Exit 0 allows the command. Exit 2 blocks it, and stderr is shown to Claude.
 #
-# Which checks run:
-#   1. .claude/verify.sh in the repo, if it exists and is executable
-#   2. otherwise a guess from the project files (Cargo, Go, npm, pytest)
-#   3. otherwise nothing, and the commit is allowed
+# A commit is allowed when any of these hold:
+#   - the session ran the verify or code-review skill (read from the transcript)
+#   - the commit message says why it was not verified: `Verified: none (<reason>)`
+#   - a merge, cherry-pick, revert, or rebase is in progress
+#   - commits were already blocked twice in this session, so Claude does not get stuck
+#   - the transcript cannot be read, so there is nothing to judge by
+# A commit is always blocked while .claude/verify.sh has uncommitted changes.
 #
-# Skipped (commit allowed without running checks):
-#   - during a merge, cherry-pick, revert, or rebase. AGENTS.md asks for one check run after the last merge instead.
-#   - when the files are the same as at the last pass in this session (amending a message, splitting one change into commits)
+# LIM_COMMIT_GATE=off|observe|enforce (default enforce). observe writes what would have
+# been blocked to .git/lim-commit-gate.log and lets the commit through.
 
 set -uo pipefail
 
 # Without jq the hook cannot read its input, so it stays out of the way.
 command -v jq >/dev/null 2>&1 || exit 0
 
+mode=${LIM_COMMIT_GATE:-enforce}
+[ "$mode" = off ] && exit 0
+
 input=$(cat)
 cmd=$(jq -r '.tool_input.command // ""' <<<"$input")
 session=$(jq -r '.session_id // "default"' <<<"$input")
 cwd=$(jq -r '.cwd // ""' <<<"$input")
+transcript=$(jq -r '.transcript_path // ""' <<<"$input")
 
 # Only gate git commit (also `git -C dir commit` and `... && git commit`).
 grep -Eq '(^|[;&|(]|[[:space:]])git[[:space:]]+(-[^[:space:]]+[[:space:]]+([^-[:space:]][^[:space:]]*[[:space:]]+)?)*commit([[:space:]]|$)' <<<"$cmd" || exit 0
@@ -29,61 +35,41 @@ cd "${CLAUDE_PROJECT_DIR:-$cwd}" 2>/dev/null || exit 0
 top=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
 cd "$top" || exit 0
 
+block() {  # $1: reason for the log, $2: message for Claude
+  if [ "$mode" = observe ]; then
+    printf '%s\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$session" "$1" "$(head -c 200 <<<"$cmd" | tr '\t\n' '  ')" \
+      >>"$(git rev-parse --git-path lim-commit-gate.log)"
+    exit 0
+  fi
+  echo "$2" >&2
+  exit 2
+}
+
 # A change must not edit the check that judges it.
 if [ -e .claude/verify.sh ] && [ -n "$(git status --porcelain -- .claude/verify.sh)" ]; then
-  echo "Commit blocked: .claude/verify.sh has uncommitted changes. Do not change the checks that judge your change. Ask the user to review and commit verify.sh themselves." >&2
-  exit 2
+  block verify.sh-changed "Commit blocked: .claude/verify.sh has uncommitted changes. Do not change the checks that judge your change. Ask the user to review and commit verify.sh themselves."
 fi
 
 for p in MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD rebase-merge rebase-apply; do
   [ -e "$(git rev-parse --git-path "$p")" ] && exit 0
 done
 
-if [ -x .claude/verify.sh ]; then
-  check='./.claude/verify.sh'
-elif [ -f Cargo.toml ]; then
-  check='cargo check -q && cargo test -q'
-elif [ -f go.mod ]; then
-  check='go vet ./... && go test ./...'
-elif [ -f package.json ] && jq -e '(.scripts.test // "") as $t | $t != "" and ($t | test("no test specified") | not)' package.json >/dev/null 2>&1; then
-  check='npm test --silent'
-elif [ -f pytest.ini ] || grep -q '^\[tool\.pytest' pyproject.toml 2>/dev/null; then
-  check='python3 -m pytest -q'
-else
+grep -Eq 'Verified:[[:space:]]*none[[:space:]]*\([^)]*[^)[:space:]][^)]*\)' <<<"$cmd" && exit 0
+
+[ -r "$transcript" ] || exit 0
+if jq -rR 'fromjson? | select(.type == "assistant") | .message.content[]?
+           | select(.type == "tool_use" and .name == "Skill") | .input.skill // empty' "$transcript" 2>/dev/null \
+     | grep -Eq '(^|:)(verify|code-review)$' \
+   || grep -Eq '<command-name>/?([^<]*:)?(verify|code-review)</command-name>' "$transcript"; then
   exit 0
 fi
 
 state="${TMPDIR:-/tmp}/claude-commit-gate-${session//[^A-Za-z0-9_-]/}"
-
-# The files as they are now (ignored files left out), as a git tree id, built in a scratch index.
-tree=""
-if idx=$(mktemp "${TMPDIR:-/tmp}/claude-commit-gate-index.XXXXXX"); then
-  trap 'rm -f "$idx"' EXIT
-  cp "$(git rev-parse --git-path index)" "$idx" 2>/dev/null || rm -f "$idx"   # a copy lets git skip unchanged files
-  tree=$(GIT_INDEX_FILE="$idx" git add -A 2>/dev/null && GIT_INDEX_FILE="$idx" git write-tree 2>/dev/null) || tree=""
-fi
-if [ -n "$tree" ] && [ "$(cat "$state.pass" 2>/dev/null)" = "$tree" ]; then
-  exit 0
-fi
-
-if out=$(bash -c "$check" 2>&1); then
+n=$(cat "$state" 2>/dev/null || echo 0)
+if [ "$mode" != observe ] && [ "$n" -ge 2 ]; then
   rm -f "$state"
-  if [ -n "$tree" ]; then echo "$tree" >"$state.pass"; fi
   exit 0
 fi
+[ "$mode" = observe ] || echo $((n + 1)) >"$state"
 
-n=$(( $(cat "$state" 2>/dev/null || echo 0) + 1 ))
-echo "$n" >"$state"
-
-{
-  echo "Commit blocked: \`$check\` failed (attempt $n)."
-  echo "--- last 60 lines ---"
-  tail -n 60 <<<"$out"
-  echo "---"
-  if [ "$n" -ge 3 ]; then
-    echo "This check has failed $n times in a row. Stop. Do not commit. Report to the user what fails, what you tried, and your best guess at the cause."
-  else
-    echo "Fix the code, not the tests or checks. If the failure is flaky or was already failing before your change, stop and tell the user instead of working around it."
-  fi
-} >&2
-exit 2
+block no-verify "Commit blocked: this session has not run the verify skill. Run it before the first commit (AGENTS.md Order of work 2). If this commit does not need verifying, end its message with \`Verified: none (<reason>)\`."

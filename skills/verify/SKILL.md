@@ -5,20 +5,19 @@ description: Check that a code change actually works by running it, not just by 
 
 # Verify
 
-Goal: evidence that the change does what the task asked, gathered by running it. This is step 2 of the Order of work in AGENTS.md: once per task, before the first commit. The commit gate runs the project's checks on `git commit`, so this skill does not run them again.
+Goal: evidence that the change does what the task asked, gathered by running it. This is step 2 of the Order of work in AGENTS.md: once per task, before the first commit. The commit gate blocks commits in a session that has not run this skill.
 
 ## When not to run it
 
 1. It already ran in this task. For review fixes, use by hand only the behavior a fix changed (AGENTS.md Order of work 5).
 2. Merging, rebasing, cherry-picking, or resolving conflicts between branches or PRs. AGENTS.md Merging says how the merged result is checked.
-3. Updating an open PR (feedback, a fix after the commit gate failed). Run the tests for the fix. The commit gate runs the rest.
-4. The change touches only docs, comments, or the PR description.
+3. Updating an open PR (feedback, a fix after checks failed). Run the tests for the fix. CI or the merge check covers the rest.
+4. The change touches only docs, comments, or the PR description. Commit it with `Verified: none (docs only)`.
 
 ## 1. Checks
 
-1. While working, run only the tests related to the change.
-2. Do not run `.claude/verify.sh` or the full suite yourself before committing. The commit gate runs them on `git commit` and shows you the failures.
-3. Exception: if the repo has no `.claude/verify.sh`, `Cargo.toml`, `go.mod`, `package.json` test script, or pytest config, the gate runs nothing. Then run the build, linter, and tests the project uses once before committing. Find them in the README, CI config, Makefile, or package manifest.
+1. Run the tests related to the change.
+2. Do not run `.claude/verify.sh` or the full suite here. They run once on the final code, before the PR is opened (AGENTS.md Order of work 6).
 
 ## 2. Use the change the way a user would
 
@@ -38,7 +37,7 @@ Compare the result with what the task asked for, not with what the code appears 
 ## 3. Rules
 
 1. Do not change tests, snapshots or golden files, lint settings, CI config, or `.claude/verify.sh` to get a pass.
-2. If a failure is flaky, do not rerun until green, add sleeps, or skip the test. Find the cause or report it.
+2. If a failure is flaky, do not rerun until green, add sleeps, or skip the test. Find the cause. If you can't, delete the test and write down why (AGENTS.md Verification 5).
 3. After 3 failed fix attempts on the same check, stop and report.
 4. Delete scratch files, including tests you wrote only to check this change once, and stop any servers you started.
 
