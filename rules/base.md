@@ -6,10 +6,10 @@ Do each step once, in order. Later rounds look only at what changed since the la
 2. Implement, running only the related tests. Do not commit yet.
 3. Verify: `.claude/skills/verify/SKILL.md` (the `verify` skill in Claude Code).
 4. Commit. The commit gate blocks it until this session has run the verify skill.
-5. Break: one subagent tries to make the committed change fail (Subagents). Do not touch the code meanwhile, or its results go stale.
-6. Fix each failure it reproduced that the change caused, add a test for it, and commit. Send the fix diff to the same subagent to rerun its reproductions. Recheck by hand only what a fix changed.
-7. Run the repo's checks once on the final code (Verification 2).
-8. Push, open the PR, and merge it without asking (Merging).
+5. Break: start one subagent in the background that tries to make the committed change fail (Subagents). Do not wait for it, and do not touch the code while it runs, or its results go stale.
+6. Meanwhile, run the repo's checks once (Verification 2), push, and open the PR.
+7. When it reports, fix each failure it reproduced that the change caused, add a test for it, commit, and push. Send the fix diff to the same subagent to rerun its reproductions. Recheck by hand only what a fix changed.
+8. Merge without asking once the checks pass and the breaker has reported (Merging).
 
 After the PR is open (feedback, merging the default branch in, conflicts): make the change, run the related tests, and commit with a `Verified:` trailer naming them. No new break or verify run unless the user asks. The commit gate allows these commits, in a new session too, since the branch has a verified commit.
 
@@ -61,7 +61,7 @@ After the PR is open (feedback, merging the default branch in, conflicts): make 
 
 ## Subagents
 
-1. Spawn none unless the user asks, except one breaker per task (Order of work 5).
+1. Spawn none unless the user asks, except one breaker per task (Order of work 5), run in the background.
 2. Give it the task, the diff of your commits against the default branch, and how to run the project. Not your reasoning or your verification report. If the repo has a REVIEW.md, it reads the default branch's version.
-3. It tries to make the change fail by running it, and reports only failures it reproduced: the command, the input, what the task says should happen, and what happened. It runs the default branch's version of each test the diff changes or deletes against the new code and reports failures, and it lists changes the task did not ask for to the other checks in Verification 3. A failure that also happens on the default branch is marked pre-existing. It reports no style, naming, structure, or future needs. Suspicions it could not reproduce, and behavior the task does not decide, go in an "unconfirmed" list.
+3. It tries to make the change fail by running it, in at most 15 commands aimed at the inputs most likely to break it, and reports only failures it reproduced: the command, the input, what the task says should happen, and what happened. It runs the default branch's version of each test the diff changes or deletes against the new code and reports failures, and it lists changes the task did not ask for to the other checks in Verification 3. A failure that also happens on the default branch is marked pre-existing. It reports no style, naming, structure, or future needs. Suspicions it could not reproduce, and behavior the task does not decide, go in an "unconfirmed" list.
 4. Send it the fix diff to rerun its reproductions (in Claude Code, continue it with SendMessage). If you cannot continue it, start one new breaker with its findings and that diff. No subagents for second opinions.

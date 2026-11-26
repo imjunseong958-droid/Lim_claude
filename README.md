@@ -121,7 +121,7 @@ It is always blocked while `.claude/verify.sh` has uncommitted changes, deletion
 
 ## Where this differs from the post
 
-1. **A breaker instead of a reviewer.** The post tunes one code reviewer. Here the subagent tries to make the change fail by running it and reports only reproduced failures, and it finds weakened tests by running the old versions against the new code. Findings from reading alone drift into nits and future needs, and each costs a round and can pull the change off course. A reproduced failure is evidence and becomes the regression test. One break round, then one rerun on the fixes.
+1. **A breaker instead of a reviewer.** The post tunes one code reviewer. Here the subagent tries to make the change fail by running it and reports only reproduced failures, and it finds weakened tests by running the old versions against the new code. Findings from reading alone drift into nits and future needs, and each costs a round and can pull the change off course. A reproduced failure is evidence and becomes the regression test. One break round of at most 15 commands, run in the background while the checks run and the PR opens, then one rerun on the fixes.
 2. **Flaky tests:** a PR that deletes one is not auto-merged. In the post a person sees each PR before merge; here nobody might, so a person checks it was not a real bug.
 3. **Commit gate:** skipping needs `Verified: none (<reason>)`, merges and rebases are not gated, and a `verify.sh` change stays blocked after two blocks.
 4. **Cheap checks:** the post suggests running tests when Claude finishes. Claude opens and merges the PR in the same turn, so that would be after the merge. Here the hook runs them before `git push`, and only without CI.
