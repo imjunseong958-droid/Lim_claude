@@ -26,12 +26,12 @@ After the PR is open (feedback, merging the default branch in, conflicts): make 
 
 1. Add a test only for behavior the task adds or changes, or to reproduce a bug you fixed. Not for coverage or to show work.
 2. A new test must be able to fail: break the behavior (undo the fix or change the code under test), see it fail, restore. Delete it if it passes either way.
-3. Cover new or changed behavior with end-to-end or golden tests through the public interface (CLI, HTTP endpoint, public API), extending the existing suite. Unit tests only for logic hard to reach that way.
+3. Cover new or changed behavior with end-to-end or golden tests through the public interface (CLI, HTTP endpoint, public API), extending the existing suite, where practical. Unit tests only for logic hard to reach that way.
 4. When golden or snapshot output changes on purpose, regenerate it, confirm every changed line is intended, and list the files in the PR.
 5. No tests that mirror the implementation, check only your own mocks, check that a constructor stores its arguments, cover trivial getters or setters, or test the language, a framework, or a library.
 6. Extend existing test files before adding new ones. Do not repeat a case already covered.
 7. One-off checks are scratch commands or programs, deleted afterwards, not tests.
-8. Parsing and encoding: property tests (round-trip, idempotency). Refactors and optimizations meant to keep behavior: compare old and new (or naive and optimized) output on the same inputs instead of adding tests. Normalize differences that don't matter, such as whitespace, and list intended ones in the PR.
+8. Parsing and encoding: property tests (round-trip, idempotency) where practical. Refactors and optimizations meant to keep behavior: compare old and new (or naive and optimized) output on the same inputs instead of adding tests. Normalize differences that don't matter, such as whitespace, and list intended ones in the PR.
 9. State machines, concurrency, permission checks, and anything that must never happen (data loss, a double charge, a skipped check): state each invariant in one sentence in the PR and check it mechanically. Enumerate every combination when inputs are few. Otherwise run random operation sequences against a simple reference model (a stateful property test). Use a model checker only if the repo already has one.
 
 ## Docs
@@ -47,7 +47,7 @@ After the PR is open (feedback, merging the default branch in, conflicts): make 
 1. New work: a short-lived branch from the latest default branch. Continuing a task or PR: its branch. Never push to the default branch.
 2. Never discard uncommitted work. Commit only the task's changes.
 3. Once verified, commit, push, and open or update the PR without asking. Ask before force-pushing.
-4. Keep the PR description short: what changed; the evidence for each item from Order of work 1 (commands run, what you saw); what was not verified and why; tests or config you changed; reproduced failures you left unfixed and the breaker's unconfirmed suspicions.
+4. Keep the PR description short: what changed; the evidence for each item from Order of work 1 (commands run, what you saw); what was not verified and why; tests or config you changed; the breaker's results (failures fixed, failures left unfixed, its unconfirmed list, or that it found nothing).
 5. End each commit message with a one-line `Verified:` trailer: the checks you ran and their result, and what you tried by hand (for a fix, how you checked it). If unchecked, write `Verified: none (<reason>)`, e.g. `Verified: none (docs only)`, which the commit gate accepts. Put it in the last paragraph, directly above trailers such as `Co-Authored-By` with no blank line between: git reads only the last paragraph as trailers. Merge commits need none.
 
 ## Merging
@@ -55,7 +55,7 @@ After the PR is open (feedback, merging the default branch in, conflicts): make 
 1. Merge the PRs you opened for a task, and those the user asks you to, without asking. No others.
 2. One at a time. First merge the latest default branch into the PR branch, resolve conflicts, and push. Do not rebase: that needs a force-push.
 3. Resolve a conflict by keeping what both sides meant. Never drop a side to make it go away. If both changed the same behavior differently and you cannot tell which is right, ask the user.
-4. Check the merged result once. With CI on PRs, wait for it and do not also run the checks locally. Without CI, the push gate checks the push in step 2.
+4. Check the merged result once. With CI on PRs, wait for it and do not also run the checks locally. Without CI, the push gate checks it on that push.
 5. If it fails, fix it on the PR branch, commit, and check again (Verification 6).
 6. Do not merge, and tell the user instead, if a person requested changes or left unresolved comments, a reproduced failure the change caused is unfixed, the PR deletes a flaky test, or branch protection blocks it. Never bypass branch protection or required checks.
 7. Use the repo's merge method (squash, merge commit, or rebase).
@@ -64,5 +64,5 @@ After the PR is open (feedback, merging the default branch in, conflicts): make 
 
 1. Spawn none unless the user asks, except one breaker per task (Order of work 5).
 2. Give it the task, the diff of your commits against the default branch, and how to run the project. Not your reasoning or your verification report. If the repo has a REVIEW.md, it reads the default branch's version.
-3. It tries to make the change fail by running it, and reports only failures it reproduced: the command, the input, what the task says should happen, and what happened. It runs the default branch's version of each test the diff changes or deletes against the new code and reports failures, and it lists changes to lint settings, CI config, or snapshots the task did not ask for. A failure that also happens on the default branch is marked pre-existing. It reports no style, naming, structure, or future needs. Suspicions it could not reproduce, and behavior the task does not decide, go in an "unconfirmed" list.
+3. It tries to make the change fail by running it, and reports only failures it reproduced: the command, the input, what the task says should happen, and what happened. It runs the default branch's version of each test the diff changes or deletes against the new code and reports failures, and it lists changes the task did not ask for to the other checks in Verification 3. A failure that also happens on the default branch is marked pre-existing. It reports no style, naming, structure, or future needs. Suspicions it could not reproduce, and behavior the task does not decide, go in an "unconfirmed" list.
 4. Send it the fix diff to rerun its reproductions (in Claude Code, continue it with SendMessage). If you cannot continue it, start one new breaker with its findings and that diff. No subagents for second opinions.

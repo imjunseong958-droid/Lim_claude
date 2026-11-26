@@ -1,20 +1,20 @@
 ---
 name: verify
-description: Check that a code change works by running it, not by reading it. Once per task, before the first commit. Not for fixes after the break round, merges, rebases, conflict resolution, updates to an open PR, or doc-only changes.
+description: Check that a code change works by running it, not by reading it. Once per task, before the first commit. Not for fixes after the break round, merges, rebases, conflict resolution, updates to an open PR, or changes to docs or comments only.
 ---
 
 # Verify
 
 Goal: evidence, gathered by running the change, for each item planned in AGENTS.md Order of work 1. Once per task, before the first commit. The commit gate blocks commits until this has run.
 
-Skip it if it already ran in this task; for merges, rebases, cherry-picks, and conflict resolution (AGENTS.md Merging); for updates to an open PR (run the fix's tests); and for doc-only changes (commit with `Verified: none (docs only)`).
+Skip it if it already ran in this task; for merges, rebases, cherry-picks, and conflict resolution (AGENTS.md Merging); for updates to an open PR (run the fix's tests); and for changes to docs or comments only (commit with `Verified: none (docs only)`).
 
 ## 1. Run
 
 1. Run the tests related to the change. Not `.claude/verify.sh` or the full suite: they run once on the final code (AGENTS.md Verification 2).
-2. Use the change the way a user would, with realistic input, following `## How to run` in AGENTS.md or the README. Add a bad input only when the change handles input.
+2. Use the change once the way a user would, with realistic input, following `## How to run` in AGENTS.md or the README. Add a bad input only when the change handles input.
    - CLI: run it with real arguments and input.
-   - Library: call the public API from a scratch program.
+   - Library: call the public API from a scratch program, or from a test if the Tests rules say to keep one.
    - HTTP service: start it and call the changed endpoints.
    - Web UI: go through the changed flow in a browser and take screenshots.
    - Mobile or desktop app: go through the flow in the simulator or the app.

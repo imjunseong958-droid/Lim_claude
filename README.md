@@ -51,7 +51,7 @@ Update pulls Lim_claude and installs again. It rewrites only changed files, dele
 ~/Lim_claude/lim.sh update ~/code/my-repo
 ```
 
-Uninstall removes the installed files and the blocks in `AGENTS.md`, `settings.json`, and `.gitignore`, restores the original `AGENTS.md` (with rules written below the block appended) and `CLAUDE.md`, and removes directories left empty. Managed files you edited, and `.claude/verify.sh`, are kept.
+Uninstall removes the installed files and the blocks in `AGENTS.md`, `settings.json`, and `.gitignore`, restores the original `AGENTS.md` (with rules written below the block appended) and `CLAUDE.md`, and removes files and directories left empty, so an `AGENTS.md` or `.claude/` that did not exist before is not left behind. Managed files you edited, and `.claude/verify.sh`, are kept.
 
 ```bash
 ~/Lim_claude/lim.sh uninstall ~/code/my-repo
@@ -96,11 +96,11 @@ Each command is judged in the checkout it runs in: its starting folder, the `cd`
 2. its message has `Verified: none (<reason>)`, in the command or a `-F` file;
 3. a verified session committed on this branch before, and that work is not on the default branch yet (a fix or PR update, maybe in a new session);
 4. a merge, cherry-pick, revert, or rebase is in progress; or
-5. commits were already blocked twice in the session, so Claude cannot get stuck. The checks still run before push or merge.
+5. commits were blocked twice in the session: the next one goes through, so Claude cannot get stuck, and the count starts over. The checks still run before push or merge.
 
 It is always blocked while `.claude/verify.sh` has uncommitted changes, deletion or rename included, even after two blocks.
 
-**Push gate.** Only without CI config (`.github/workflows/*.yml`, `.gitlab-ci.yml`, `.circleci/config.yml`, `azure-pipelines.yml`, `bitbucket-pipelines.yml`, `.travis.yml`, `Jenkinsfile`, `.buildkite`). It runs the checks in the push's checkout and blocks a failing push, showing Claude the last 60 lines. After 3 failures in a row it tells Claude to stop and report, and keeps blocking. A tree that already passed in the session is not checked again.
+**Push gate.** Only without CI config (`.github/workflows/*.yml`, `.gitlab-ci.yml`, `.circleci/config.yml`, `azure-pipelines.yml`, `bitbucket-pipelines.yml`, `.travis.yml`, `Jenkinsfile`, `.buildkite`). It runs the checks in the push's checkout and blocks a failing push, showing Claude the last 60 lines. After 3 failures in a row in a session, it tells Claude to stop and report to the user, and keeps blocking. A tree that already passed in the session is not checked again.
 
 **Modes.** `LIM_COMMIT_GATE=enforce` (default) blocks. `observe` blocks nothing and logs what it would have blocked to `.git/lim-commit-gate.log`. `off` does nothing. In a team repo, start with `observe` and look for false blocks: `LIM_COMMIT_GATE=observe claude`, or `"env"` in `.claude/settings.json` (team) or `.claude/settings.local.json` (you). Without `jq`, the hook does nothing.
 
@@ -121,7 +121,7 @@ It is always blocked while `.claude/verify.sh` has uncommitted changes, deletion
 | A review of an out-of-date commit means nothing | Order of work 5 |
 | Rounds build on earlier rounds | Order of work, Subagents 4 |
 | Pre-existing bugs are not the author's to fix | Subagents 3 |
-| The person defines "done" and reviews the evidence | Order of work 1, Git and PRs 4 |
+| The person defines "done" and reviews the evidence | The agent writes what "done" means before implementing and puts the evidence for each item in the PR, where a person can check it, since it may merge with no one looking (Order of work 1, Git and PRs 4) |
 
 ## Where this differs from the post
 
@@ -132,7 +132,7 @@ It is always blocked while `.claude/verify.sh` has uncommitted changes, deletion
 
 ## Added beyond the post
 
-1. **Auto-merge** (Merging). Agents merge their own PRs. The latest default branch is merged in first and the result checked again, because PRs that pass alone can break together. The agent asks instead on an unclear conflict, requested changes, an unfixed reproduced failure, a deleted flaky test, or branch protection. Force-pushes need approval.
+1. **Auto-merge** (Merging). Agents merge their own PRs. The latest default branch is merged in first and the result checked again, because PRs that pass alone can break together. The agent asks instead on an unclear conflict, requested changes, an unfixed failure the change caused, a deleted flaky test, or branch protection. Force-pushes need approval.
 2. **No duplicated work** (Order of work). Verifying, reviewing, fixing, and verifying again from scratch, then again at merge, made each task take far too long. Each step now runs once, later rounds see only what changed, and PR updates get no new break or verify run.
 3. **Fewer tests** (Tests). Tests that mirror the code, check only mocks, or exist for coverage catch no bugs and make refactoring harder. A test is kept only if breaking its behavior makes it fail.
 4. **Fewer docs** (Docs). Overviews and summaries tell an agent nothing the code doesn't, go stale, and mislead the next agent.
@@ -145,9 +145,9 @@ As the post says, turn misses into guardrails, and prune them.
 
 1. When the same kind of bug gets through twice, add a check that would have caught it: a test, a line in `verify.sh`, or a rule below the END line. A person approves it in a PR.
 2. A `REVIEW.md` on the default branch can give the breaker a checklist: a trigger visible in a diff, and what to try when it matches.
-3. Every PR lists the breaker's results. If it keeps finding nothing on some kind of change, or its unconfirmed suspicions keep turning out real, adjust REVIEW.md.
+3. Every PR lists the breaker's results (Git and PRs 4). If it keeps finding nothing on some kind of change, or its unconfirmed items keep turning out real, adjust REVIEW.md.
 4. Rules, checks, and tests only grow if you let them. Delete what no longer catches anything.
 
 ## Working on Lim_claude
 
-`rules/` becomes the AGENTS.md block; `skills/` and `hooks/` are copied under the repo's `.claude/`. After changing `lim.sh` or the hook, run `tests/test_lim.sh`. It builds scratch repos, runs install, reinstall, and uninstall, checks that uninstall leaves the repo as it was, and feeds the hook the events Claude Code sends.
+`rules/` becomes the AGENTS.md block; `skills/` and `hooks/` are copied under the repo's `.claude/`. After changing `lim.sh` or the hook, run `tests/test_lim.sh`. It builds scratch repos, runs install, reinstall (including changes on the Lim_claude side), and uninstall, checks that uninstall leaves the repo as it was, and feeds the hook the events Claude Code sends.
